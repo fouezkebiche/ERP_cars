@@ -539,7 +539,503 @@ module.exports = { sequelize, testConnection };
 
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\controllers\analytics.controller.js
+// src/controllers/analytics.controller.js
+const analyticsService = require('../services/analytics.service');
+const { sendSuccess, sendError } = require('../utils/response.util');
+const { query, validationResult } = require('express-validator');
 
+/**
+ * Helper: Parse date range from query params with defaults
+ */
+const parseDateRange = (req) => {
+  const { start_date, end_date, period = 'month' } = req.query;
+  
+  let startDate, endDate;
+  
+  if (start_date && end_date) {
+    startDate = new Date(start_date);
+    endDate = new Date(end_date);
+  } else {
+    // Default based on period
+    endDate = new Date();
+    startDate = new Date();
+    
+    switch (period) {
+      case 'today':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate.setDate(startDate.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(startDate.getMonth() - 1);
+        break;
+      case 'quarter':
+        startDate.setMonth(startDate.getMonth() - 3);
+        break;
+      case 'year':
+        startDate.setFullYear(startDate.getFullYear() - 1);
+        break;
+      default:
+        startDate.setMonth(startDate.getMonth() - 1);
+    }
+  }
+  
+  return { startDate, endDate };
+};
+
+// ============================================
+// GET /api/analytics/dashboard - Dashboard KPIs
+// ============================================
+const getDashboard = [
+  query('period').optional().isIn(['today', 'week', 'month', 'quarter', 'year']),
+  query('start_date').optional().isISO8601(),
+  query('end_date').optional().isISO8601(),
+  
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { startDate, endDate } = parseDateRange(req);
+      const companyId = req.companyId;
+
+      console.log(`📊 Fetching dashboard for company ${companyId} from ${startDate} to ${endDate}`);
+
+      const dashboardData = await analyticsService.getDashboardKPIs(
+        companyId,
+        startDate,
+        endDate
+      );
+
+      sendSuccess(res, {
+        message: 'Dashboard KPIs fetched successfully',
+        data: dashboardData,
+      });
+    } catch (error) {
+      console.error('💥 Get dashboard error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to fetch dashboard data',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// GET /api/analytics/revenue - Revenue Analytics
+// ============================================
+const getRevenue = [
+  query('period').optional().isIn(['today', 'week', 'month', 'quarter', 'year']),
+  query('start_date').optional().isISO8601(),
+  query('end_date').optional().isISO8601(),
+  query('compare').optional().isBoolean(),
+  
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { startDate, endDate } = parseDateRange(req);
+      const { compare = 'false' } = req.query;
+      const companyId = req.companyId;
+
+      console.log(`💰 Fetching revenue for company ${companyId}`);
+
+      let revenueData;
+      
+      if (compare === 'true') {
+        // Get revenue with comparison to previous period
+        revenueData = await analyticsService.getRevenueComparison(
+          companyId,
+          startDate,
+          endDate
+        );
+      } else {
+        // Get revenue for current period only
+        revenueData = await analyticsService.calculateRevenue(
+          companyId,
+          startDate,
+          endDate
+        );
+      }
+
+      sendSuccess(res, {
+        message: 'Revenue analytics fetched successfully',
+        data: {
+          period: { start: startDate, end: endDate },
+          ...revenueData,
+        },
+      });
+    } catch (error) {
+      console.error('💥 Get revenue error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to fetch revenue analytics',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// GET /api/analytics/vehicles - Vehicle Performance
+// ============================================
+const getVehiclePerformance = [
+  query('period').optional().isIn(['today', 'week', 'month', 'quarter', 'year']),
+  query('start_date').optional().isISO8601(),
+  query('end_date').optional().isISO8601(),
+  query('metric').optional().isIn(['utilization', 'revenue', 'profit']),
+  query('limit').optional().isInt({ min: 1, max: 100 }),
+  
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { startDate, endDate } = parseDateRange(req);
+      const { metric = 'utilization', limit = 10 } = req.query;
+      const companyId = req.companyId;
+
+      console.log(`🚗 Fetching vehicle performance for company ${companyId}`);
+
+      let vehicleData;
+
+      switch (metric) {
+        case 'profit':
+          // Get profit/loss analysis
+          vehicleData = await analyticsService.calculateVehicleProfitLoss(
+            companyId,
+            startDate,
+            endDate
+          );
+          vehicleData = vehicleData.slice(0, parseInt(limit));
+          break;
+          
+        case 'revenue':
+          // Get top revenue generators
+          const utilization = await analyticsService.calculateVehicleUtilization(
+            companyId,
+            startDate,
+            endDate
+          );
+          vehicleData = utilization
+            .sort((a, b) => b.total_revenue - a.total_revenue)
+            .slice(0, parseInt(limit));
+          break;
+          
+        case 'utilization':
+        default:
+          // Get top utilized vehicles
+          vehicleData = await analyticsService.getTopPerformingVehicles(
+            companyId,
+            startDate,
+            endDate,
+            parseInt(limit)
+          );
+          break;
+      }
+
+      // Calculate fleet summary
+      const allVehicles = await analyticsService.calculateVehicleUtilization(
+        companyId,
+        startDate,
+        endDate
+      );
+
+      const fleetSummary = {
+        total_vehicles: allVehicles.length,
+        average_utilization: allVehicles.reduce((sum, v) => sum + v.utilization_rate, 0) / allVehicles.length,
+        total_revenue: allVehicles.reduce((sum, v) => sum + v.total_revenue, 0),
+        total_rentals: allVehicles.reduce((sum, v) => sum + v.rental_count, 0),
+      };
+
+      sendSuccess(res, {
+        message: 'Vehicle performance analytics fetched successfully',
+        data: {
+          period: { start: startDate, end: endDate },
+          metric: metric,
+          fleet_summary: fleetSummary,
+          vehicles: vehicleData,
+        },
+      });
+    } catch (error) {
+      console.error('💥 Get vehicle performance error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to fetch vehicle performance',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// GET /api/analytics/vehicles/utilization - Detailed Utilization
+// ============================================
+const getVehicleUtilization = [
+  query('period').optional().isIn(['today', 'week', 'month', 'quarter', 'year']),
+  query('start_date').optional().isISO8601(),
+  query('end_date').optional().isISO8601(),
+  query('vehicle_id').optional().isUUID(),
+  
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { startDate, endDate } = parseDateRange(req);
+      const { vehicle_id } = req.query;
+      const companyId = req.companyId;
+
+      console.log(`📊 Fetching utilization for company ${companyId}`);
+
+      const utilization = await analyticsService.calculateVehicleUtilization(
+        companyId,
+        startDate,
+        endDate
+      );
+
+      // Filter by vehicle if specified
+      const filteredData = vehicle_id
+        ? utilization.filter(v => v.vehicle_id === vehicle_id)
+        : utilization;
+
+      sendSuccess(res, {
+        message: 'Vehicle utilization fetched successfully',
+        data: {
+          period: { start: startDate, end: endDate },
+          vehicles: filteredData,
+        },
+      });
+    } catch (error) {
+      console.error('💥 Get vehicle utilization error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to fetch vehicle utilization',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// GET /api/analytics/vehicles/profit-loss - P&L Analysis
+// ============================================
+const getVehicleProfitLoss = [
+  query('period').optional().isIn(['month', 'quarter', 'year']),
+  query('start_date').optional().isISO8601(),
+  query('end_date').optional().isISO8601(),
+  
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { startDate, endDate } = parseDateRange(req);
+      const companyId = req.companyId;
+
+      console.log(`💵 Fetching P&L for company ${companyId}`);
+
+      const profitLoss = await analyticsService.calculateVehicleProfitLoss(
+        companyId,
+        startDate,
+        endDate
+      );
+
+      // Calculate totals
+      const totals = {
+        total_revenue: profitLoss.reduce((sum, v) => sum + v.total_revenue, 0),
+        total_costs: profitLoss.reduce((sum, v) => sum + v.total_costs, 0),
+        total_profit: profitLoss.reduce((sum, v) => sum + v.profit, 0),
+      };
+
+      totals.profit_margin = totals.total_revenue > 0
+        ? (totals.total_profit / totals.total_revenue) * 100
+        : 0;
+
+      sendSuccess(res, {
+        message: 'Vehicle profit/loss analytics fetched successfully',
+        data: {
+          period: { start: startDate, end: endDate },
+          totals,
+          vehicles: profitLoss,
+        },
+      });
+    } catch (error) {
+      console.error('💥 Get vehicle P&L error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to fetch vehicle profit/loss',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// GET /api/analytics/customers - Customer Analytics
+// ============================================
+const getCustomerAnalytics = [
+  query('period').optional().isIn(['week', 'month', 'quarter', 'year']),
+  query('start_date').optional().isISO8601(),
+  query('end_date').optional().isISO8601(),
+  
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { startDate, endDate } = parseDateRange(req);
+      const companyId = req.companyId;
+
+      console.log(`👥 Fetching customer analytics for company ${companyId}`);
+
+      // Get segmentation and retention in parallel
+      const [segmentation, retention] = await Promise.all([
+        analyticsService.segmentCustomers(companyId),
+        analyticsService.getCustomerRetention(companyId, startDate, endDate),
+      ]);
+
+      sendSuccess(res, {
+        message: 'Customer analytics fetched successfully',
+        data: {
+          period: { start: startDate, end: endDate },
+          segmentation,
+          retention,
+        },
+      });
+    } catch (error) {
+      console.error('💥 Get customer analytics error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to fetch customer analytics',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// GET /api/analytics/customers/segmentation - Customer Segments
+// ============================================
+const getCustomerSegmentation = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    console.log(`🎯 Fetching customer segmentation for company ${companyId}`);
+
+    const segmentation = await analyticsService.segmentCustomers(companyId);
+
+    sendSuccess(res, {
+      message: 'Customer segmentation fetched successfully',
+      data: segmentation,
+    });
+  } catch (error) {
+    console.error('💥 Get customer segmentation error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch customer segmentation',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/analytics/customers/retention - Retention Metrics
+// ============================================
+const getCustomerRetention = [
+  query('period').optional().isIn(['week', 'month', 'quarter', 'year']),
+  query('start_date').optional().isISO8601(),
+  query('end_date').optional().isISO8601(),
+  
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { startDate, endDate } = parseDateRange(req);
+      const companyId = req.companyId;
+
+      console.log(`🔄 Fetching customer retention for company ${companyId}`);
+
+      const retention = await analyticsService.getCustomerRetention(
+        companyId,
+        startDate,
+        endDate
+      );
+
+      sendSuccess(res, {
+        message: 'Customer retention metrics fetched successfully',
+        data: {
+          period: { start: startDate, end: endDate },
+          ...retention,
+        },
+      });
+    } catch (error) {
+      console.error('💥 Get customer retention error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to fetch customer retention',
+        details: error.message,
+      });
+    }
+  },
+];
+
+module.exports = {
+  getDashboard,
+  getRevenue,
+  getVehiclePerformance,
+  getVehicleUtilization,
+  getVehicleProfitLoss,
+  getCustomerAnalytics,
+  getCustomerSegmentation,
+  getCustomerRetention,
+};
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\controllers\auth.controller.js
 // src/controllers/auth.controller.js
@@ -948,16 +1444,2458 @@ module.exports = {
 };
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\controllers\contract.controller.js
+// src/controllers/contract.controller.js
+const { Contract, Customer, Vehicle, User, Payment, sequelize } = require('../models');
+const { sendSuccess, sendError } = require('../utils/response.util');
+const { body, validationResult } = require('express-validator');
+const { Op } = require('sequelize');
+const { applyTenantFilter, applyTenantData } = require('../middleware/tenantIsolation.middleware');
 
+// ============================================
+// HELPER: Generate contract number (atomic with uniqueness check)
+// ============================================
+const generateContractNumber = async (companyId, transaction) => {
+  const year = new Date().getFullYear();
+  const yearPrefix = `RENT-${year}-`;
+
+  // Find the highest existing number for this year/company
+  const maxContract = await Contract.findOne({
+    where: {
+      company_id: companyId,
+      contract_number: { [Op.like]: `${yearPrefix}%` },
+    },
+    order: [['contract_number', 'DESC']], // Sort by contract_number DESC for max
+    transaction, // Use transaction for isolation
+  });
+
+  let nextNumber = 1;
+  if (maxContract) {
+    nextNumber = parseInt(maxContract.contract_number.split('-')[2]) + 1;
+  }
+
+  // Loop to ensure uniqueness (handles races/stale data)
+  let contractNumber;
+  do {
+    contractNumber = `${yearPrefix}${String(nextNumber).padStart(4, '0')}`;
+    const exists = await Contract.findOne({
+      where: {
+        company_id: companyId,
+        contract_number: contractNumber,
+      },
+      transaction, // Use transaction
+    });
+    if (!exists) break;
+    nextNumber++;
+  } while (true);
+
+  return contractNumber;
+};
+
+// ============================================
+// HELPER: Calculate contract totals
+// ============================================
+const calculateContractTotals = (data) => {
+  // Parse strings to numbers safely (fixes the concat bug)
+  const dailyRate = parseFloat(data.daily_rate) || 0;
+  const additionalCharges = parseFloat(data.additional_charges || 0);
+  const discountAmount = parseFloat(data.discount_amount || 0);
+
+  const startDate = new Date(data.start_date);
+  const endDate = new Date(data.end_date);
+  const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  
+  if (totalDays <= 0) {
+    throw new Error('Invalid date range: end date must be after start date');
+  }
+
+  const baseAmount = dailyRate * totalDays;
+  const subtotal = baseAmount + additionalCharges - discountAmount;
+  const taxAmount = subtotal * 0.19; // 19% tax
+  const totalAmount = subtotal + taxAmount;
+
+  return {
+    total_days: totalDays,
+    base_amount: baseAmount,
+    tax_amount: taxAmount,
+    total_amount: totalAmount,
+  };
+};
+
+// ============================================
+// GET /api/contracts - List all contracts
+// ============================================
+const getAllContracts = async (req, res) => {
+  try {
+    const {
+      status,
+      customer_id,
+      vehicle_id,
+      start_date,
+      end_date,
+      search,
+      page = 1,
+      limit = 20,
+      sort_by = 'created_at',
+      sort_order = 'DESC',
+    } = req.query;
+
+    // Build filter with tenant isolation
+    const whereClause = applyTenantFilter(req);
+
+    // Apply filters
+    if (status) whereClause.status = status;
+    if (customer_id) whereClause.customer_id = customer_id;
+    if (vehicle_id) whereClause.vehicle_id = vehicle_id;
+
+    // Date range filter
+    if (start_date || end_date) {
+      whereClause.start_date = {};
+      if (start_date) whereClause.start_date[Op.gte] = start_date;
+      if (end_date) whereClause.start_date[Op.lte] = end_date;
+    }
+
+    // Search by contract number
+    if (search) {
+      whereClause.contract_number = { [Op.iLike]: `%${search}%` };
+    }
+
+    // Pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Fetch contracts with relations
+    const { count, rows: contracts } = await Contract.findAndCountAll({
+      where: whereClause,
+      include: [
+        {
+          model: Customer,
+          as: 'customer',
+          attributes: ['id', 'full_name', 'email', 'phone', 'customer_type'],
+        },
+        {
+          model: Vehicle,
+          as: 'vehicle',
+          attributes: ['id', 'brand', 'model', 'year', 'registration_number', 'status'],
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'full_name', 'email'],
+        },
+      ],
+      limit: parseInt(limit),
+      offset: offset,
+      order: [[sort_by, sort_order.toUpperCase()]],
+    });
+
+    console.log(`📋 Fetched ${contracts.length} contracts for company ${req.companyId}`);
+
+    sendSuccess(res, {
+      message: 'Contracts fetched successfully',
+      data: { contracts },
+      meta: {
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total_pages: Math.ceil(count / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Get contracts error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch contracts',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/contracts/:id - Get single contract
+// ============================================
+const getContractById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const contract = await Contract.findOne({
+      where: applyTenantFilter(req, { id }),
+      include: [
+        {
+          model: Customer,
+          as: 'customer',
+        },
+        {
+          model: Vehicle,
+          as: 'vehicle',
+        },
+        {
+          model: User,
+          as: 'creator',
+          attributes: ['id', 'full_name', 'email'],
+        },
+        {
+          model: Payment,
+          as: 'payments',
+        },
+      ],
+    });
+
+    if (!contract) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Contract not found',
+      });
+    }
+
+    console.log(`📄 Contract fetched: ${contract.contract_number}`);
+
+    sendSuccess(res, {
+      message: 'Contract fetched successfully',
+      data: { contract },
+    });
+  } catch (error) {
+    console.error('💥 Get contract error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch contract',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// POST /api/contracts - Create new contract
+// ============================================
+const createContract = [
+  // Validators
+  body('customer_id').isUUID().withMessage('Valid customer ID required'),
+  body('vehicle_id').isUUID().withMessage('Valid vehicle ID required'),
+  body('start_date').isISO8601().withMessage('Valid start date required'),
+  body('end_date').isISO8601().withMessage('Valid end date required'),
+  body('daily_rate').isFloat({ min: 0 }).withMessage('Valid daily rate required'),
+  body('deposit_amount').optional().isFloat({ min: 0 }),
+  body('additional_charges').optional().isFloat({ min: 0 }),
+  body('discount_amount').optional().isFloat({ min: 0 }),
+  body('mileage_limit').optional().isInt({ min: 0 }),
+  body('extras').optional().isObject(),
+  body('notes').optional().trim(),
+
+  async (req, res) => {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { customer_id, vehicle_id, start_date, end_date } = req.body;
+
+      // Validate dates
+      if (new Date(end_date) <= new Date(start_date)) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 422,
+          message: 'End date must be after start date',
+        });
+      }
+
+      // Check customer exists and is not blacklisted
+      const customer = await Customer.findOne({
+        where: applyTenantFilter(req, { id: customer_id }),
+      });
+
+      if (!customer) {
+        await transaction.rollback();
+        return sendError(res, { statusCode: 404, message: 'Customer not found' });
+      }
+
+      if (customer.is_blacklisted) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 403,
+          message: 'Cannot create contract for blacklisted customer',
+        });
+      }
+
+      // Check vehicle exists and is available
+      const vehicle = await Vehicle.findOne({
+        where: applyTenantFilter(req, { id: vehicle_id }),
+      });
+
+      if (!vehicle) {
+        await transaction.rollback();
+        return sendError(res, { statusCode: 404, message: 'Vehicle not found' });
+      }
+
+      if (vehicle.status !== 'available') {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 409,
+          message: `Vehicle is not available (current status: ${vehicle.status})`,
+        });
+      }
+
+      // Check for conflicting contracts
+      const conflictingContract = await Contract.findOne({
+        where: {
+          vehicle_id,
+          status: 'active',
+          [Op.or]: [
+            { start_date: { [Op.between]: [start_date, end_date] } },
+            { end_date: { [Op.between]: [start_date, end_date] } },
+            {
+              [Op.and]: [
+                { start_date: { [Op.lte]: start_date } },
+                { end_date: { [Op.gte]: end_date } },
+              ],
+            },
+          ],
+        },
+      });
+
+      if (conflictingContract) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 409,
+          message: 'Vehicle already has an active contract in this date range',
+        });
+      }
+
+      // Generate contract number (pass transaction)
+      const contractNumber = await generateContractNumber(req.companyId, transaction);
+
+      // Calculate totals
+      const totals = calculateContractTotals(req.body);
+
+      // Create contract
+      const contractData = applyTenantData(req, {
+        ...req.body,
+        contract_number: contractNumber,
+        created_by: req.user.id,
+        status: 'active',
+        start_mileage: vehicle.mileage,
+        ...totals,
+      });
+
+      const contract = await Contract.create(contractData, { transaction });
+
+      // Update vehicle status
+      await vehicle.update({ status: 'rented' }, { transaction });
+
+      // Update customer stats
+      await customer.update(
+        {
+          total_rentals: customer.total_rentals + 1,
+          lifetime_value: parseFloat(customer.lifetime_value) + totals.total_amount,
+        },
+        { transaction }
+      );
+
+      await transaction.commit();
+
+      // Fetch contract with relations
+      const fullContract = await Contract.findByPk(contract.id, {
+        include: [
+          { model: Customer, as: 'customer' },
+          { model: Vehicle, as: 'vehicle' },
+          { model: User, as: 'creator', attributes: ['id', 'full_name'] },
+        ],
+      });
+
+      console.log(`📄 New contract created: ${contractNumber}`);
+
+      sendSuccess(res, {
+        statusCode: 201,
+        message: 'Contract created successfully',
+        data: { contract: fullContract },
+      });
+    } catch (error) {
+      await transaction.rollback();
+      console.error('💥 Create contract error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to create contract',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// PUT /api/contracts/:id - Update contract
+// ============================================
+const updateContract = [
+  body('end_date').optional().isISO8601(),
+  body('additional_charges').optional().isFloat({ min: 0 }),
+  body('discount_amount').optional().isFloat({ min: 0 }),
+  body('notes').optional().trim(),
+  body('extras').optional().isObject(),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { id } = req.params;
+
+      const contract = await Contract.findOne({
+        where: applyTenantFilter(req, { id }),
+      });
+
+      if (!contract) {
+        return sendError(res, { statusCode: 404, message: 'Contract not found' });
+      }
+
+      // Only allow updates for active or draft contracts
+      if (!['active', 'draft'].includes(contract.status)) {
+        return sendError(res, {
+          statusCode: 409,
+          message: `Cannot update ${contract.status} contract`,
+        });
+      }
+
+      // If updating end_date or charges, recalculate totals
+      if (req.body.end_date || req.body.additional_charges !== undefined || req.body.discount_amount !== undefined) {
+        const updateData = {
+          start_date: contract.start_date,
+          end_date: req.body.end_date || contract.end_date,
+          daily_rate: contract.daily_rate,
+          additional_charges: req.body.additional_charges ?? contract.additional_charges,
+          discount_amount: req.body.discount_amount ?? contract.discount_amount,
+        };
+
+        const totals = calculateContractTotals(updateData);
+        Object.assign(req.body, totals);
+      }
+
+      await contract.update(req.body);
+
+      console.log(`🔄 Contract updated: ${contract.contract_number}`);
+
+      sendSuccess(res, {
+        message: 'Contract updated successfully',
+        data: { contract },
+      });
+    } catch (error) {
+      console.error('💥 Update contract error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to update contract',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// POST /api/contracts/:id/complete - Complete rental
+// ============================================
+const completeContract = [
+  body('actual_return_date').isISO8601().withMessage('Valid return date required'),
+  body('end_mileage').isInt({ min: 0 }).withMessage('Valid end mileage required'),
+  body('additional_charges').optional().isFloat({ min: 0 }),
+  body('notes').optional().trim(),
+
+  async (req, res) => {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { id } = req.params;
+      const { actual_return_date, end_mileage, additional_charges, notes } = req.body;
+
+      const contract = await Contract.findOne({
+        where: applyTenantFilter(req, { id }),
+        include: [{ model: Vehicle, as: 'vehicle' }],
+      });
+
+      if (!contract) {
+        await transaction.rollback();
+        return sendError(res, { statusCode: 404, message: 'Contract not found' });
+      }
+
+      if (contract.status !== 'active') {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 409,
+          message: `Cannot complete ${contract.status} contract`,
+        });
+      }
+
+      // Calculate mileage charges if exceeded
+      const mileageDriven = end_mileage - contract.start_mileage;
+      let mileageCharges = 0;
+
+      if (contract.mileage_limit && mileageDriven > contract.mileage_limit) {
+        const excessMileage = mileageDriven - contract.mileage_limit;
+        const chargePerKm = contract.mileage_charge_per_km || 5; // Default 5 DZD per km
+        mileageCharges = excessMileage * chargePerKm;
+      }
+
+      const totalAdditionalCharges = (additional_charges || 0) + mileageCharges;
+
+      // Recalculate total if additional charges
+      let updateData = {
+        status: 'completed',
+        actual_return_date,
+        end_mileage,
+        deposit_returned: true,
+      };
+
+      if (totalAdditionalCharges > 0) {
+        updateData.additional_charges = parseFloat(contract.additional_charges) + totalAdditionalCharges;
+        
+        const totals = calculateContractTotals({
+          start_date: contract.start_date,
+          end_date: contract.end_date,
+          daily_rate: contract.daily_rate,
+          additional_charges: updateData.additional_charges,
+          discount_amount: contract.discount_amount,
+        });
+
+        updateData = { ...updateData, ...totals };
+      }
+
+      if (notes) updateData.notes = notes;
+
+      await contract.update(updateData, { transaction });
+
+      // Update vehicle status and mileage
+      await contract.vehicle.update(
+        {
+          status: 'available',
+          mileage: end_mileage,
+        },
+        { transaction }
+      );
+
+      await transaction.commit();
+
+      console.log(`✅ Contract completed: ${contract.contract_number}`);
+
+      sendSuccess(res, {
+        message: 'Contract completed successfully',
+        data: { contract },
+      });
+    } catch (error) {
+      await transaction.rollback();
+      console.error('💥 Complete contract error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to complete contract',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// POST /api/contracts/:id/cancel - Cancel contract
+// ============================================
+const cancelContract = [
+  body('reason').optional().trim(),
+
+  async (req, res) => {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const { id } = req.params;
+      const { reason } = req.body;
+
+      const contract = await Contract.findOne({
+        where: applyTenantFilter(req, { id }),
+        include: [
+          { model: Vehicle, as: 'vehicle' },
+          { model: Customer, as: 'customer' },
+        ],
+      });
+
+      if (!contract) {
+        await transaction.rollback();
+        return sendError(res, { statusCode: 404, message: 'Contract not found' });
+      }
+
+      if (contract.status !== 'active') {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 409,
+          message: `Cannot cancel ${contract.status} contract`,
+        });
+      }
+
+      // Update contract
+      await contract.update(
+        {
+          status: 'cancelled',
+          notes: reason ? `${contract.notes || ''}\nCancellation reason: ${reason}` : contract.notes,
+        },
+        { transaction }
+      );
+
+      // Return vehicle to available
+      await contract.vehicle.update({ status: 'available' }, { transaction });
+
+      // Update customer stats (decrement)
+      await contract.customer.update(
+        {
+          total_rentals: Math.max(0, contract.customer.total_rentals - 1),
+          lifetime_value: Math.max(0, parseFloat(contract.customer.lifetime_value) - parseFloat(contract.total_amount)),
+        },
+        { transaction }
+      );
+
+      await transaction.commit();
+
+      console.log(`❌ Contract cancelled: ${contract.contract_number}`);
+
+      sendSuccess(res, {
+        message: 'Contract cancelled successfully',
+        data: { contract },
+      });
+    } catch (error) {
+      await transaction.rollback();
+      console.error('💥 Cancel contract error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to cancel contract',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// POST /api/contracts/:id/extend - Extend rental
+// ============================================
+const extendContract = [
+  body('new_end_date').isISO8601().withMessage('Valid new end date required'),
+  body('notes').optional().trim(),
+  async (req, res) => {
+    const transaction = await sequelize.transaction(); // Add for safety
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+      const { id } = req.params;
+      const { new_end_date, notes } = req.body;
+      const contract = await Contract.findOne({
+        where: applyTenantFilter(req, { id }),
+        include: [{ model: Vehicle, as: 'vehicle' }], // Load vehicle for ID
+      });
+      if (!contract) {
+        await transaction.rollback();
+        return sendError(res, { statusCode: 404, message: 'Contract not found' });
+      }
+      if (contract.status !== 'active') {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 409,
+          message: `Cannot extend ${contract.status} contract`,
+        });
+      }
+      // Validate new end date is after current end date
+      if (new Date(new_end_date) <= new Date(contract.end_date)) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 422,
+          message: 'New end date must be after current end date',
+        });
+      }
+      // Check for conflicts (inside transaction)
+      const conflictingContract = await Contract.findOne({
+        where: {
+          vehicle_id: contract.vehicle_id,
+          status: 'active',
+          id: { [Op.ne]: contract.id },
+          start_date: { [Op.lte]: new_end_date },
+          end_date: { [Op.gte]: new Date(contract.end_date) },
+        },
+        transaction,
+      });
+      if (conflictingContract) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 409,
+          message: 'Cannot extend: vehicle has another booking during the extended period',
+        });
+      }
+      // Recalculate totals (now safe with parsing)
+      const totals = calculateContractTotals({
+        start_date: contract.start_date,
+        end_date: new_end_date,
+        daily_rate: contract.daily_rate,
+        additional_charges: contract.additional_charges,
+        discount_amount: contract.discount_amount,
+      });
+      await contract.update({
+        end_date: new_end_date,
+        // status: 'extended',  // Removed: Keep as 'active'
+        ...totals,
+        notes: notes ? `${contract.notes || ''}\nExtended to ${new_end_date}: ${notes}` : contract.notes, // Clearer note
+      }, { transaction });
+      await transaction.commit();
+      console.log(`📅 Contract extended: ${contract.contract_number}`);
+      sendSuccess(res, {
+        message: 'Contract extended successfully',
+        data: { contract },
+      });
+    } catch (error) {
+      await transaction.rollback();
+      console.error('💥 Extend contract error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to extend contract',
+        details: error.message,
+      });
+    }
+  },
+];
+// ============================================
+// GET /api/contracts/stats - Get contract statistics
+// ============================================
+const getContractStats = async (req, res) => {
+  try {
+    const companyFilter = { company_id: req.companyId };
+    // Total contracts
+    const totalContracts = await Contract.count({ where: companyFilter });
+    // By status
+    const active = await Contract.count({ where: { ...companyFilter, status: 'active' } });
+    const completed = await Contract.count({ where: { ...companyFilter, status: 'completed' } });
+    const cancelled = await Contract.count({ where: { ...companyFilter, status: 'cancelled' } });
+    // Revenue
+    const revenueResult = await Contract.findOne({
+      where: companyFilter,
+      attributes: [
+        [sequelize.fn('SUM', sequelize.col('total_amount')), 'total_revenue'],
+      ],
+      raw: true,
+    });
+    // Recent contracts (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const recentContracts = await Contract.count({
+      where: {
+        ...companyFilter,
+        created_at: { [Op.gte]: thirtyDaysAgo },
+      },
+    });
+    const stats = {
+      total_contracts: totalContracts,
+      by_status: { active, completed, cancelled }, // Removed extended
+      total_revenue: parseFloat(revenueResult?.total_revenue || 0),
+      recent_contracts_30d: recentContracts,
+    };
+    sendSuccess(res, {
+      message: 'Contract statistics fetched successfully',
+      data: { stats },
+    });
+  } catch (error) {
+    console.error('💥 Get contract stats error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch contract statistics',
+      details: error.message,
+    });
+  }
+};
+
+module.exports = {
+  getAllContracts,
+  getContractById,
+  createContract,
+  updateContract,
+  completeContract,
+  cancelContract,
+  extendContract,
+  getContractStats,
+};
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\controllers\customer.controller.js
+// src/controllers/customer.controller.js
+const { Customer, Contract, Payment, Vehicle, sequelize } = require('../models');
+const { sendSuccess, sendError } = require('../utils/response.util');
+const { body, validationResult } = require('express-validator');
+const { Op } = require('sequelize');
+const { applyTenantFilter, applyTenantData } = require('../middleware/tenantIsolation.middleware');
 
+// ============================================
+// GET /api/customers - List all customers (with filters & search)
+// ============================================
+const getAllCustomers = async (req, res) => {
+  try {
+    const {
+      customer_type,
+      is_blacklisted,
+      search,
+      page = 1,
+      limit = 20,
+      sort_by = 'created_at',
+      sort_order = 'DESC',
+    } = req.query;
+
+    // Build filter object with tenant isolation
+    const whereClause = applyTenantFilter(req);
+
+    // Apply customer type filter
+    if (customer_type) {
+      whereClause.customer_type = customer_type;
+    }
+
+    // Apply blacklist filter
+    if (is_blacklisted !== undefined) {
+      whereClause.is_blacklisted = is_blacklisted === 'true';
+    }
+
+    // Apply search (name, email, phone, license)
+    if (search) {
+      whereClause[Op.or] = [
+        { full_name: { [Op.iLike]: `%${search}%` } },
+        { email: { [Op.iLike]: `%${search}%` } },
+        { phone: { [Op.iLike]: `%${search}%` } },
+        { drivers_license_number: { [Op.iLike]: `%${search}%` } },
+        { company_name: { [Op.iLike]: `%${search}%` } },
+      ];
+    }
+
+    // Pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Fetch customers
+    const { count, rows: customers } = await Customer.findAndCountAll({
+      where: whereClause,
+      limit: parseInt(limit),
+      offset: offset,
+      order: [[sort_by, sort_order.toUpperCase()]],
+      attributes: {
+        exclude: ['id_card_photo_url', 'license_photo_url'], // Don't send photo URLs in list
+      },
+    });
+
+    console.log(`📋 Fetched ${customers.length} customers for company ${req.companyId}`);
+
+    sendSuccess(res, {
+      message: 'Customers fetched successfully',
+      data: { customers },
+      meta: {
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total_pages: Math.ceil(count / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Get customers error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch customers',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/customers/:id - Get single customer with full details
+// ============================================
+const getCustomerById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const customer = await Customer.findOne({
+      where: applyTenantFilter(req, { id }),
+    });
+
+    if (!customer) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Customer not found',
+      });
+    }
+
+    console.log(`👤 Customer fetched: ${customer.full_name}`);
+
+    sendSuccess(res, {
+      message: 'Customer fetched successfully',
+      data: { customer },
+    });
+  } catch (error) {
+    console.error('💥 Get customer error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch customer',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/customers/:id/history - Get customer rental history
+// ============================================
+const getCustomerHistory = async (req, res) => {
+  try {
+    const { id: customer_id } = req.params;
+    const { status, start_date, end_date, page = 1, limit = 10 } = req.query;
+
+    // Check if customer exists and belongs to company
+    const customer = await Customer.findOne({
+      where: applyTenantFilter(req, { id: customer_id }),
+    });
+
+    if (!customer) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Customer not found',
+      });
+    }
+
+    // Build filter for contracts
+    const whereClause = {
+      customer_id,
+      company_id: req.companyId, // Ensure tenant isolation
+    };
+
+    if (status) {
+      whereClause.status = status;
+    }
+
+    if (start_date || end_date) {
+      whereClause.start_date = {};
+      if (start_date) whereClause.start_date[Op.gte] = start_date;
+      if (end_date) whereClause.start_date[Op.lte] = end_date;
+    }
+
+    // Pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Fetch contracts with vehicle and payment details
+    const { count, rows: contracts } = await Contract.findAndCountAll({
+      where: whereClause,
+      include: [
+        {
+          model: Vehicle,
+          as: 'vehicle',
+          attributes: ['id', 'brand', 'model', 'year', 'registration_number'],
+        },
+        {
+          model: Payment,
+          as: 'payments',
+          attributes: ['id', 'amount', 'payment_method', 'payment_date', 'status'],
+        },
+      ],
+      limit: parseInt(limit),
+      offset: offset,
+      order: [['start_date', 'DESC']],
+    });
+
+    // Calculate statistics
+    const stats = {
+      total_contracts: count,
+      total_spent: contracts.reduce((sum, c) => sum + parseFloat(c.total_amount || 0), 0),
+      completed_contracts: contracts.filter(c => c.status === 'completed').length,
+      active_contracts: contracts.filter(c => c.status === 'active').length,
+    };
+
+    console.log(`📜 Fetched ${contracts.length} contracts for customer ${customer_id}`);
+
+    sendSuccess(res, {
+      message: 'Customer rental history fetched successfully',
+      data: { 
+        customer: {
+          id: customer.id,
+          full_name: customer.full_name,
+          email: customer.email,
+          phone: customer.phone,
+        },
+        contracts,
+        stats,
+      },
+      meta: {
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total_pages: Math.ceil(count / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Get customer history error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch customer history',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// POST /api/customers - Create new customer
+// ============================================
+const createCustomer = [
+  // Validators
+  body('customer_type').isIn(['individual', 'corporate']).withMessage('Valid customer type required'),
+  body('full_name').notEmpty().withMessage('Full name is required').trim(),
+  body('company_name').optional().trim(),
+  body('email').optional().isEmail().withMessage('Valid email required').normalizeEmail(),
+  body('phone').notEmpty().withMessage('Phone is required').trim(),
+  body('address').optional().trim(),
+  body('city').optional().trim(),
+  body('date_of_birth').optional().isISO8601().withMessage('Valid date required'),
+  body('id_card_number').optional().trim(),
+  body('drivers_license_number').optional().trim(),
+  body('license_expiry_date').optional().isISO8601().withMessage('Valid date required'),
+  body('emergency_contact_name').optional().trim(),
+  body('emergency_contact_phone').optional().trim(),
+  body('notes').optional().trim(),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      // Check if license number already exists (if provided)
+      if (req.body.drivers_license_number) {
+        const existingCustomer = await Customer.findOne({
+          where: { drivers_license_number: req.body.drivers_license_number },
+        });
+
+        if (existingCustomer) {
+          return sendError(res, {
+            statusCode: 409,
+            message: 'Customer with this license number already exists',
+          });
+        }
+      }
+
+      // Apply tenant data (adds company_id automatically)
+      const customerData = applyTenantData(req, req.body);
+
+      const customer = await Customer.create(customerData);
+
+      console.log(`👤 New customer created: ${customer.full_name} (${customer.customer_type})`);
+
+      sendSuccess(res, {
+        statusCode: 201,
+        message: 'Customer created successfully',
+        data: { customer },
+      });
+    } catch (error) {
+      console.error('💥 Create customer error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to create customer',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// PUT /api/customers/:id - Update customer
+// ============================================
+const updateCustomer = [
+  // Validators (all optional for update)
+  body('customer_type').optional().isIn(['individual', 'corporate']),
+  body('full_name').optional().notEmpty().trim(),
+  body('company_name').optional().trim(),
+  body('email').optional().isEmail().normalizeEmail(),
+  body('phone').optional().notEmpty().trim(),
+  body('address').optional().trim(),
+  body('city').optional().trim(),
+  body('date_of_birth').optional().isISO8601(),
+  body('drivers_license_number').optional().trim(),
+  body('license_expiry_date').optional().isISO8601(),
+  body('is_blacklisted').optional().isBoolean(),
+  body('notes').optional().trim(),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { id } = req.params;
+
+      // Check if customer exists and belongs to company
+      const customer = await Customer.findOne({
+        where: applyTenantFilter(req, { id }),
+      });
+
+      if (!customer) {
+        return sendError(res, {
+          statusCode: 404,
+          message: 'Customer not found',
+        });
+      }
+
+      // If license number is being updated, check uniqueness
+      if (req.body.drivers_license_number && req.body.drivers_license_number !== customer.drivers_license_number) {
+        const existingCustomer = await Customer.findOne({
+          where: { drivers_license_number: req.body.drivers_license_number },
+        });
+
+        if (existingCustomer) {
+          return sendError(res, {
+            statusCode: 409,
+            message: 'Customer with this license number already exists',
+          });
+        }
+      }
+
+      // Update customer
+      await customer.update(req.body);
+
+      console.log(`🔄 Customer updated: ${customer.full_name}`);
+
+      sendSuccess(res, {
+        message: 'Customer updated successfully',
+        data: { customer },
+      });
+    } catch (error) {
+      console.error('💥 Update customer error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to update customer',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// DELETE /api/customers/:id - Delete customer
+// ============================================
+const deleteCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if customer exists and belongs to company
+    const customer = await Customer.findOne({
+      where: applyTenantFilter(req, { id }),
+    });
+
+    if (!customer) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Customer not found',
+      });
+    }
+
+    // Check if customer has active contracts
+    const activeContracts = await Contract.count({
+      where: {
+        customer_id: id,
+        status: 'active',
+      },
+    });
+
+    if (activeContracts > 0) {
+      return sendError(res, {
+        statusCode: 409,
+        message: 'Cannot delete customer with active contracts',
+      });
+    }
+
+    // Instead of hard delete, you could soft-delete by setting a flag
+    // For now, we'll do a hard delete but you can modify this
+    await customer.destroy();
+
+    console.log(`🗑️ Customer deleted: ${customer.full_name}`);
+
+    sendSuccess(res, {
+      message: 'Customer deleted successfully',
+      data: { id },
+    });
+  } catch (error) {
+    console.error('💥 Delete customer error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to delete customer',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/customers/stats - Get customer statistics
+// ============================================
+const getCustomerStats = async (req, res) => {
+  try {
+    const companyFilter = { company_id: req.companyId };
+
+    // Get total customers
+    const totalCustomers = await Customer.count({ where: companyFilter });
+
+    // Get customers by type
+    const individual = await Customer.count({ 
+      where: { ...companyFilter, customer_type: 'individual' } 
+    });
+    const corporate = await Customer.count({ 
+      where: { ...companyFilter, customer_type: 'corporate' } 
+    });
+
+    // Get blacklisted customers
+    const blacklisted = await Customer.count({ 
+      where: { ...companyFilter, is_blacklisted: true } 
+    });
+
+    // Get top customers by lifetime value
+    const topCustomers = await Customer.findAll({
+      where: companyFilter,
+      order: [['lifetime_value', 'DESC']],
+      limit: 5,
+      attributes: ['id', 'full_name', 'email', 'total_rentals', 'lifetime_value'],
+    });
+
+    // Get recent customers (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const recentCustomers = await Customer.count({
+      where: {
+        ...companyFilter,
+        created_at: { [Op.gte]: thirtyDaysAgo },
+      },
+    });
+
+    const stats = {
+      total_customers: totalCustomers,
+      by_type: {
+        individual,
+        corporate,
+      },
+      blacklisted,
+      recent_customers_30d: recentCustomers,
+      top_customers: topCustomers,
+    };
+
+    console.log(`📊 Customer stats fetched for company ${req.companyId}`);
+
+    sendSuccess(res, {
+      message: 'Customer statistics fetched successfully',
+      data: { stats },
+    });
+  } catch (error) {
+    console.error('💥 Get customer stats error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch customer statistics',
+      details: error.message,
+    });
+  }
+};
+
+module.exports = {
+  getAllCustomers,
+  getCustomerById,
+  getCustomerHistory,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+  getCustomerStats,
+};
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\controllers\payment.controller.js
+// src/controllers/payment.controller.js
+const { Payment, Contract, Customer, Vehicle, User, sequelize } = require('../models');
+const { sendSuccess, sendError } = require('../utils/response.util');
+const { body, validationResult } = require('express-validator');
+const { Op } = require('sequelize');
+const { applyTenantFilter, applyTenantData } = require('../middleware/tenantIsolation.middleware');
 
+// ============================================
+// GET /api/payments - List all payments
+// ============================================
+const getAllPayments = async (req, res) => {
+  try {
+    const {
+      contract_id,
+      customer_id,
+      payment_method,
+      status,
+      start_date,
+      end_date,
+      search,
+      page = 1,
+      limit = 20,
+      sort_by = 'payment_date',
+      sort_order = 'DESC',
+    } = req.query;
+
+    // Build filter with tenant isolation
+    const whereClause = applyTenantFilter(req);
+
+    // Apply filters
+    if (contract_id) whereClause.contract_id = contract_id;
+    if (customer_id) whereClause.customer_id = customer_id;
+    if (payment_method) whereClause.payment_method = payment_method;
+    if (status) whereClause.status = status;
+
+    // Date range filter
+    if (start_date || end_date) {
+      whereClause.payment_date = {};
+      if (start_date) whereClause.payment_date[Op.gte] = start_date;
+      if (end_date) whereClause.payment_date[Op.lte] = end_date;
+    }
+
+    // Search by reference number
+    if (search) {
+      whereClause.reference_number = { [Op.iLike]: `%${search}%` };
+    }
+
+    // Pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Fetch payments with relations
+    const { count, rows: payments } = await Payment.findAndCountAll({
+      where: whereClause,
+      include: [
+        {
+          model: Contract,
+          as: 'contract',
+          attributes: ['id', 'contract_number', 'total_amount', 'status'],
+          include: [
+            {
+              model: Vehicle,
+              as: 'vehicle',
+              attributes: ['id', 'brand', 'model', 'registration_number'],
+            },
+          ],
+        },
+        {
+          model: Customer,
+          as: 'customer',
+          attributes: ['id', 'full_name', 'email', 'phone', 'customer_type'],
+        },
+        {
+          model: User,
+          as: 'processor',
+          attributes: ['id', 'full_name', 'email'],
+        },
+      ],
+      limit: parseInt(limit),
+      offset: offset,
+      order: [[sort_by, sort_order.toUpperCase()]],
+    });
+
+    console.log(`💰 Fetched ${payments.length} payments for company ${req.companyId}`);
+
+    sendSuccess(res, {
+      message: 'Payments fetched successfully',
+      data: { payments },
+      meta: {
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total_pages: Math.ceil(count / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Get payments error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch payments',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/payments/:id - Get single payment
+// ============================================
+const getPaymentById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const payment = await Payment.findOne({
+      where: applyTenantFilter(req, { id }),
+      include: [
+        {
+          model: Contract,
+          as: 'contract',
+          include: [
+            {
+              model: Vehicle,
+              as: 'vehicle',
+              attributes: ['id', 'brand', 'model', 'registration_number', 'year'],
+            },
+          ],
+        },
+        {
+          model: Customer,
+          as: 'customer',
+        },
+        {
+          model: User,
+          as: 'processor',
+          attributes: ['id', 'full_name', 'email'],
+        },
+      ],
+    });
+
+    if (!payment) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Payment not found',
+      });
+    }
+
+    console.log(`💳 Payment fetched: ${payment.reference_number || payment.id}`);
+
+    sendSuccess(res, {
+      message: 'Payment fetched successfully',
+      data: { payment },
+    });
+  } catch (error) {
+    console.error('💥 Get payment error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch payment',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// POST /api/payments - Record new payment
+// ============================================
+const createPayment = [
+  // Validators
+  body('contract_id').isUUID().withMessage('Valid contract ID required'),
+  body('amount').isFloat({ min: 0.01 }).withMessage('Valid amount required (must be positive)'),
+  body('payment_method')
+    .isIn(['cash', 'card', 'bank_transfer', 'check', 'mobile_payment'])
+    .withMessage('Invalid payment method'),
+  body('payment_date').optional().isISO8601().withMessage('Valid payment date required'),
+  body('reference_number').optional().trim(),
+  body('notes').optional().trim(),
+  body('status')
+    .optional()
+    .isIn(['pending', 'completed', 'failed', 'refunded'])
+    .withMessage('Invalid status'),
+
+  async (req, res) => {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { contract_id, amount, payment_method, payment_date, reference_number, notes, status = 'completed' } = req.body;
+
+      // Check if contract exists and belongs to company
+      const contract = await Contract.findOne({
+        where: applyTenantFilter(req, { id: contract_id }),
+        include: [
+          {
+            model: Customer,
+            as: 'customer',
+          },
+        ],
+      });
+
+      if (!contract) {
+        await transaction.rollback();
+        return sendError(res, { statusCode: 404, message: 'Contract not found' });
+      }
+
+      // Validate payment amount doesn't exceed contract total
+      const totalPaid = await Payment.sum('amount', {
+        where: {
+          contract_id,
+          status: 'completed',
+        },
+      });
+
+      const totalPaidAmount = parseFloat(totalPaid || 0);
+      const contractTotal = parseFloat(contract.total_amount);
+      const newPaymentAmount = parseFloat(amount);
+
+      if (totalPaidAmount + newPaymentAmount > contractTotal) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 422,
+          message: `Payment amount exceeds contract balance. Outstanding: ${(contractTotal - totalPaidAmount).toFixed(2)} DZD`,
+        });
+      }
+
+      // Create payment
+      const paymentData = applyTenantData(req, {
+        contract_id,
+        customer_id: contract.customer_id,
+        amount: newPaymentAmount,
+        payment_method,
+        payment_date: payment_date || new Date(),
+        reference_number,
+        notes,
+        status,
+        processed_by: req.user.id,
+      });
+
+      const payment = await Payment.create(paymentData, { transaction });
+
+      await transaction.commit();
+
+      // Fetch payment with relations
+      const fullPayment = await Payment.findByPk(payment.id, {
+        include: [
+          { model: Contract, as: 'contract' },
+          { model: Customer, as: 'customer' },
+          { model: User, as: 'processor', attributes: ['id', 'full_name'] },
+        ],
+      });
+
+      console.log(`💳 New payment recorded: ${newPaymentAmount} DZD for contract ${contract.contract_number}`);
+
+      sendSuccess(res, {
+        statusCode: 201,
+        message: 'Payment recorded successfully',
+        data: { payment: fullPayment },
+      });
+    } catch (error) {
+      await transaction.rollback();
+      console.error('💥 Create payment error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to record payment',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// PUT /api/payments/:id - Update payment
+// ============================================
+const updatePayment = [
+  body('amount').optional().isFloat({ min: 0.01 }),
+  body('payment_method').optional().isIn(['cash', 'card', 'bank_transfer', 'check', 'mobile_payment']),
+  body('payment_date').optional().isISO8601(),
+  body('reference_number').optional().trim(),
+  body('status').optional().isIn(['pending', 'completed', 'failed', 'refunded']),
+  body('notes').optional().trim(),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { id } = req.params;
+
+      const payment = await Payment.findOne({
+        where: applyTenantFilter(req, { id }),
+      });
+
+      if (!payment) {
+        return sendError(res, { statusCode: 404, message: 'Payment not found' });
+      }
+
+      // Only allow updates for pending or failed payments
+      if (payment.status === 'completed' && req.body.status !== 'refunded') {
+        return sendError(res, {
+          statusCode: 409,
+          message: 'Cannot update completed payment (use refund instead)',
+        });
+      }
+
+      await payment.update(req.body);
+
+      console.log(`🔄 Payment updated: ${payment.id}`);
+
+      sendSuccess(res, {
+        message: 'Payment updated successfully',
+        data: { payment },
+      });
+    } catch (error) {
+      console.error('💥 Update payment error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to update payment',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// GET /api/payments/outstanding - Get outstanding payments
+// ============================================
+const getOutstandingPayments = async (req, res) => {
+  try {
+    const { customer_id, page = 1, limit = 20 } = req.query;
+
+    // Build filter
+    const contractWhere = applyTenantFilter(req, {
+      status: { [Op.in]: ['active', 'completed'] },
+    });
+
+    if (customer_id) {
+      contractWhere.customer_id = customer_id;
+    }
+
+    // Get all contracts with payments
+    const contracts = await Contract.findAll({
+      where: contractWhere,
+      include: [
+        {
+          model: Payment,
+          as: 'payments',
+          where: { status: 'completed' },
+          required: false,
+        },
+        {
+          model: Customer,
+          as: 'customer',
+          attributes: ['id', 'full_name', 'email', 'phone', 'customer_type'],
+        },
+        {
+          model: Vehicle,
+          as: 'vehicle',
+          attributes: ['id', 'brand', 'model', 'registration_number'],
+        },
+      ],
+    });
+
+    // Calculate outstanding balances
+    const outstandingContracts = contracts
+      .map((contract) => {
+        const totalAmount = parseFloat(contract.total_amount);
+        const totalPaid = contract.payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+        const outstanding = totalAmount - totalPaid;
+
+        return {
+          contract_id: contract.id,
+          contract_number: contract.contract_number,
+          customer: contract.customer,
+          vehicle: contract.vehicle,
+          total_amount: totalAmount,
+          total_paid: totalPaid,
+          outstanding_amount: outstanding,
+          status: contract.status,
+          start_date: contract.start_date,
+          end_date: contract.end_date,
+        };
+      })
+      .filter((c) => c.outstanding_amount > 0); // Only contracts with outstanding balance
+
+    // Sort by outstanding amount (highest first)
+    outstandingContracts.sort((a, b) => b.outstanding_amount - a.outstanding_amount);
+
+    // Pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const paginatedResults = outstandingContracts.slice(offset, offset + parseInt(limit));
+    const totalOutstanding = outstandingContracts.reduce((sum, c) => sum + c.outstanding_amount, 0);
+
+    console.log(`📊 Found ${outstandingContracts.length} contracts with outstanding payments`);
+
+    sendSuccess(res, {
+      message: 'Outstanding payments fetched successfully',
+      data: {
+        outstanding_contracts: paginatedResults,
+        summary: {
+          total_contracts: outstandingContracts.length,
+          total_outstanding_amount: totalOutstanding,
+        },
+      },
+      meta: {
+        pagination: {
+          total: outstandingContracts.length,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total_pages: Math.ceil(outstandingContracts.length / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Get outstanding payments error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch outstanding payments',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/contracts/:id/payments - Get payments for contract
+// ============================================
+const getContractPayments = async (req, res) => {
+  try {
+    const { id: contract_id } = req.params;
+
+    // Check if contract exists and belongs to company
+    const contract = await Contract.findOne({
+      where: applyTenantFilter(req, { id: contract_id }),
+      include: [
+        {
+          model: Customer,
+          as: 'customer',
+          attributes: ['id', 'full_name', 'email', 'phone'],
+        },
+        {
+          model: Vehicle,
+          as: 'vehicle',
+          attributes: ['id', 'brand', 'model', 'registration_number'],
+        },
+      ],
+    });
+
+    if (!contract) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Contract not found',
+      });
+    }
+
+    // Get all payments for this contract
+    const payments = await Payment.findAll({
+      where: { contract_id },
+      include: [
+        {
+          model: User,
+          as: 'processor',
+          attributes: ['id', 'full_name', 'email'],
+        },
+      ],
+      order: [['payment_date', 'DESC']],
+    });
+
+    // Calculate payment summary
+    const totalPaid = payments
+      .filter((p) => p.status === 'completed')
+      .reduce((sum, p) => sum + parseFloat(p.amount), 0);
+
+    const totalAmount = parseFloat(contract.total_amount);
+    const outstandingAmount = totalAmount - totalPaid;
+    const paymentPercentage = ((totalPaid / totalAmount) * 100).toFixed(2);
+
+    const summary = {
+      contract_number: contract.contract_number,
+      customer: contract.customer,
+      vehicle: contract.vehicle,
+      total_amount: totalAmount,
+      total_paid: totalPaid,
+      outstanding_amount: outstandingAmount,
+      payment_percentage: parseFloat(paymentPercentage),
+      payment_count: payments.length,
+      completed_payments: payments.filter((p) => p.status === 'completed').length,
+    };
+
+    console.log(`💰 Fetched ${payments.length} payments for contract ${contract.contract_number}`);
+
+    sendSuccess(res, {
+      message: 'Contract payments fetched successfully',
+      data: {
+        payments,
+        summary,
+      },
+    });
+  } catch (error) {
+    console.error('💥 Get contract payments error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch contract payments',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/payments/stats - Get payment statistics
+// ============================================
+const getPaymentStats = async (req, res) => {
+  try {
+    const companyFilter = { company_id: req.companyId };
+
+    // Total payments
+    const totalPayments = await Payment.count({ where: companyFilter });
+
+    // By status
+    const completed = await Payment.count({ where: { ...companyFilter, status: 'completed' } });
+    const pending = await Payment.count({ where: { ...companyFilter, status: 'pending' } });
+    const failed = await Payment.count({ where: { ...companyFilter, status: 'failed' } });
+    const refunded = await Payment.count({ where: { ...companyFilter, status: 'refunded' } });
+
+    // By payment method
+    const byMethod = await Payment.findAll({
+      where: companyFilter,
+      attributes: ['payment_method', [sequelize.fn('COUNT', sequelize.col('id')), 'count']],
+      group: ['payment_method'],
+      raw: true,
+    });
+
+    // Total revenue
+    const revenueResult = await Payment.findOne({
+      where: { ...companyFilter, status: 'completed' },
+      attributes: [[sequelize.fn('SUM', sequelize.col('amount')), 'total_revenue']],
+      raw: true,
+    });
+
+    // Recent payments (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const recentPayments = await Payment.count({
+      where: {
+        ...companyFilter,
+        payment_date: { [Op.gte]: thirtyDaysAgo },
+        status: 'completed',
+      },
+    });
+
+    const recentRevenue = await Payment.findOne({
+      where: {
+        ...companyFilter,
+        payment_date: { [Op.gte]: thirtyDaysAgo },
+        status: 'completed',
+      },
+      attributes: [[sequelize.fn('SUM', sequelize.col('amount')), 'revenue']],
+      raw: true,
+    });
+
+    const stats = {
+      total_payments: totalPayments,
+      by_status: { completed, pending, failed, refunded },
+      by_method: byMethod.reduce((acc, item) => {
+        acc[item.payment_method] = parseInt(item.count);
+        return acc;
+      }, {}),
+      total_revenue: parseFloat(revenueResult?.total_revenue || 0),
+      recent_payments_30d: recentPayments,
+      recent_revenue_30d: parseFloat(recentRevenue?.revenue || 0),
+    };
+
+    sendSuccess(res, {
+      message: 'Payment statistics fetched successfully',
+      data: { stats },
+    });
+  } catch (error) {
+    console.error('💥 Get payment stats error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch payment statistics',
+      details: error.message,
+    });
+  }
+};
+
+module.exports = {
+  getAllPayments,
+  getPaymentById,
+  createPayment,
+  updatePayment,
+  getOutstandingPayments,
+  getContractPayments,
+  getPaymentStats,
+};
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\controllers\vehicle.controller.js
+// src/controllers/vehicle.controller.js
+const { Vehicle, VehicleCost, Contract } = require('../models');
+const { sendSuccess, sendError } = require('../utils/response.util');
+const { body, validationResult } = require('express-validator');
+const { Op } = require('sequelize');
+const { applyTenantFilter, applyTenantData } = require('../middleware/tenantIsolation.middleware');
 
+// ============================================
+// GET /api/vehicles - List all vehicles (with filters)
+// ============================================
+const getAllVehicles = async (req, res) => {
+  try {
+    const {
+      status,
+      brand,
+      transmission,
+      fuel_type,
+      min_rate,
+      max_rate,
+      search,
+      page = 1,
+      limit = 10,
+      sort_by = 'created_at',
+      sort_order = 'DESC',
+    } = req.query;
+
+    // Build filter object with tenant isolation
+    const whereClause = applyTenantFilter(req);
+
+    // Apply status filter
+    if (status) {
+      whereClause.status = status;
+    }
+
+    // Apply brand filter
+    if (brand) {
+      whereClause.brand = brand;
+    }
+
+    // Apply transmission filter
+    if (transmission) {
+      whereClause.transmission = transmission;
+    }
+
+    // Apply fuel type filter
+    if (fuel_type) {
+      whereClause.fuel_type = fuel_type;
+    }
+
+    // Apply rate range filter
+    if (min_rate || max_rate) {
+      whereClause.daily_rate = {};
+      if (min_rate) whereClause.daily_rate[Op.gte] = parseFloat(min_rate);
+      if (max_rate) whereClause.daily_rate[Op.lte] = parseFloat(max_rate);
+    }
+
+    // Apply search (brand, model, registration_number)
+    if (search) {
+      whereClause[Op.or] = [
+        { brand: { [Op.iLike]: `%${search}%` } },
+        { model: { [Op.iLike]: `%${search}%` } },
+        { registration_number: { [Op.iLike]: `%${search}%` } },
+      ];
+    }
+
+    // Pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Fetch vehicles
+    const { count, rows: vehicles } = await Vehicle.findAndCountAll({
+      where: whereClause,
+      limit: parseInt(limit),
+      offset: offset,
+      order: [[sort_by, sort_order.toUpperCase()]],
+    });
+
+    console.log(`📋 Fetched ${vehicles.length} vehicles for company ${req.companyId}`);
+
+    sendSuccess(res, {
+      message: 'Vehicles fetched successfully',
+      data: { vehicles },
+      meta: {
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total_pages: Math.ceil(count / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Get vehicles error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch vehicles',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/vehicles/available - Get available vehicles
+// ============================================
+const getAvailableVehicles = async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+
+    // Build filter for available vehicles
+    const whereClause = applyTenantFilter(req, { status: 'available' });
+
+    // If dates provided, check for conflicts with existing contracts
+    let vehicles;
+    if (start_date && end_date) {
+      // Find vehicles that don't have active contracts in the date range
+      vehicles = await Vehicle.findAll({
+        where: whereClause,
+        include: [
+          {
+            model: Contract,
+            as: 'contracts',
+            where: {
+              status: 'active',
+              [Op.or]: [
+                {
+                  start_date: { [Op.between]: [start_date, end_date] },
+                },
+                {
+                  end_date: { [Op.between]: [start_date, end_date] },
+                },
+                {
+                  [Op.and]: [
+                    { start_date: { [Op.lte]: start_date } },
+                    { end_date: { [Op.gte]: end_date } },
+                  ],
+                },
+              ],
+            },
+            required: false, // LEFT JOIN - include vehicles with no conflicts
+          },
+        ],
+      });
+
+      // Filter out vehicles with active contracts in date range
+      vehicles = vehicles.filter(v => v.contracts.length === 0);
+    } else {
+      // Just return vehicles with status 'available'
+      vehicles = await Vehicle.findAll({ where: whereClause });
+    }
+
+    console.log(`✅ Found ${vehicles.length} available vehicles`);
+
+    sendSuccess(res, {
+      message: 'Available vehicles fetched successfully',
+      data: { vehicles },
+    });
+  } catch (error) {
+    console.error('💥 Get available vehicles error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch available vehicles',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/vehicles/:id - Get single vehicle
+// ============================================
+const getVehicleById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const vehicle = await Vehicle.findOne({
+      where: applyTenantFilter(req, { id }),
+      include: [
+        {
+          model: VehicleCost,
+          as: 'costs',
+          limit: 10,
+          order: [['incurred_date', 'DESC']],
+        },
+        {
+          model: Contract,
+          as: 'contracts',
+          where: { status: 'active' },
+          required: false,
+        },
+      ],
+    });
+
+    if (!vehicle) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Vehicle not found',
+      });
+    }
+
+    console.log(`🚗 Vehicle fetched: ${vehicle.brand} ${vehicle.model}`);
+
+    sendSuccess(res, {
+      message: 'Vehicle fetched successfully',
+      data: { vehicle },
+    });
+  } catch (error) {
+    console.error('💥 Get vehicle error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch vehicle',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// POST /api/vehicles - Create vehicle
+// ============================================
+const createVehicle = [
+  // Validators
+  body('brand').notEmpty().withMessage('Brand is required'),
+  body('model').notEmpty().withMessage('Model is required'),
+  body('year').isInt({ min: 1900, max: new Date().getFullYear() + 1 }).withMessage('Valid year required'),
+  body('registration_number').notEmpty().withMessage('Registration number is required'),
+  body('color').optional().isString(),
+  body('transmission').isIn(['manual', 'automatic']).withMessage('Valid transmission required'),
+  body('fuel_type').isIn(['petrol', 'diesel', 'electric', 'hybrid']).withMessage('Valid fuel type required'),
+  body('seats').isInt({ min: 1, max: 50 }).withMessage('Valid number of seats required'),
+  body('daily_rate').isFloat({ min: 0 }).withMessage('Valid daily rate required'),
+  body('status').optional().isIn(['available', 'rented', 'maintenance', 'retired']),
+  body('mileage').optional().isInt({ min: 0 }),
+  body('purchase_price').optional().isFloat({ min: 0 }),
+  body('purchase_date').optional().isISO8601(),
+  body('vin').optional().isLength({ min: 17, max: 17 }).withMessage('VIN must be 17 characters'),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      // Check if registration number already exists
+      const existingVehicle = await Vehicle.findOne({
+        where: { registration_number: req.body.registration_number },
+      });
+
+      if (existingVehicle) {
+        return sendError(res, {
+          statusCode: 409,
+          message: 'Vehicle with this registration number already exists',
+        });
+      }
+
+      // Apply tenant data (adds company_id automatically)
+      const vehicleData = applyTenantData(req, req.body);
+
+      const vehicle = await Vehicle.create(vehicleData);
+
+      console.log(`🚗 New vehicle created: ${vehicle.brand} ${vehicle.model} (${vehicle.registration_number})`);
+
+      sendSuccess(res, {
+        statusCode: 201,
+        message: 'Vehicle created successfully',
+        data: { vehicle },
+      });
+    } catch (error) {
+      console.error('💥 Create vehicle error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to create vehicle',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// PUT /api/vehicles/:id - Update vehicle
+// ============================================
+const updateVehicle = [
+  // Validators (all optional for update)
+  body('brand').optional().notEmpty().withMessage('Brand cannot be empty'),
+  body('model').optional().notEmpty().withMessage('Model cannot be empty'),
+  body('year').optional().isInt({ min: 1900, max: new Date().getFullYear() + 1 }),
+  body('registration_number').optional().notEmpty(),
+  body('transmission').optional().isIn(['manual', 'automatic']),
+  body('fuel_type').optional().isIn(['petrol', 'diesel', 'electric', 'hybrid']),
+  body('seats').optional().isInt({ min: 1, max: 50 }),
+  body('daily_rate').optional().isFloat({ min: 0 }),
+  body('status').optional().isIn(['available', 'rented', 'maintenance', 'retired']),
+  body('mileage').optional().isInt({ min: 0 }),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { id } = req.params;
+
+      // Check if vehicle exists and belongs to company
+      const vehicle = await Vehicle.findOne({
+        where: applyTenantFilter(req, { id }),
+      });
+
+      if (!vehicle) {
+        return sendError(res, {
+          statusCode: 404,
+          message: 'Vehicle not found',
+        });
+      }
+
+      // If registration number is being updated, check uniqueness
+      if (req.body.registration_number && req.body.registration_number !== vehicle.registration_number) {
+        const existingVehicle = await Vehicle.findOne({
+          where: { registration_number: req.body.registration_number },
+        });
+
+        if (existingVehicle) {
+          return sendError(res, {
+            statusCode: 409,
+            message: 'Vehicle with this registration number already exists',
+          });
+        }
+      }
+
+      // Update vehicle
+      await vehicle.update(req.body);
+
+      console.log(`🔄 Vehicle updated: ${vehicle.brand} ${vehicle.model}`);
+
+      sendSuccess(res, {
+        message: 'Vehicle updated successfully',
+        data: { vehicle },
+      });
+    } catch (error) {
+      console.error('💥 Update vehicle error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to update vehicle',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// DELETE /api/vehicles/:id - Delete vehicle
+// ============================================
+const deleteVehicle = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if vehicle exists and belongs to company
+    const vehicle = await Vehicle.findOne({
+      where: applyTenantFilter(req, { id }),
+    });
+
+    if (!vehicle) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Vehicle not found',
+      });
+    }
+
+    // Check if vehicle has active contracts
+    const activeContracts = await Contract.count({
+      where: {
+        vehicle_id: id,
+        status: 'active',
+      },
+    });
+
+    if (activeContracts > 0) {
+      return sendError(res, {
+        statusCode: 409,
+        message: 'Cannot delete vehicle with active contracts',
+      });
+    }
+
+    // Soft delete: update status to 'retired' instead of hard delete
+    await vehicle.update({ status: 'retired' });
+
+    console.log(`🗑️ Vehicle retired: ${vehicle.brand} ${vehicle.model}`);
+
+    sendSuccess(res, {
+      message: 'Vehicle deleted successfully',
+      data: { vehicle },
+    });
+  } catch (error) {
+    console.error('💥 Delete vehicle error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to delete vehicle',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// POST /api/vehicles/:id/costs - Add vehicle cost
+// ============================================
+const addVehicleCost = [
+  body('cost_type')
+    .isIn(['fuel', 'maintenance', 'insurance', 'registration', 'cleaning', 'repair', 'other'])
+    .withMessage('Valid cost type required'),
+  body('amount').isFloat({ min: 0 }).withMessage('Valid amount required'),
+  body('incurred_date').isISO8601().withMessage('Valid date required'),
+  body('description').optional().isString(),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { id: vehicle_id } = req.params;
+
+      // Check if vehicle exists and belongs to company
+      const vehicle = await Vehicle.findOne({
+        where: applyTenantFilter(req, { id: vehicle_id }),
+      });
+
+      if (!vehicle) {
+        return sendError(res, {
+          statusCode: 404,
+          message: 'Vehicle not found',
+        });
+      }
+
+      // Create cost record
+      const cost = await VehicleCost.create({
+        vehicle_id,
+        created_by: req.user.id,
+        ...req.body,
+      });
+
+      console.log(`💰 Cost added to vehicle ${vehicle_id}: ${cost.cost_type} - ${cost.amount}`);
+
+      sendSuccess(res, {
+        statusCode: 201,
+        message: 'Vehicle cost added successfully',
+        data: { cost },
+      });
+    } catch (error) {
+      console.error('💥 Add vehicle cost error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to add vehicle cost',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// GET /api/vehicles/:id/costs - Get cost history
+// ============================================
+const getVehicleCosts = async (req, res) => {
+  try {
+    const { id: vehicle_id } = req.params;
+    const { cost_type, start_date, end_date, page = 1, limit = 20 } = req.query;
+
+    // Check if vehicle exists and belongs to company
+    const vehicle = await Vehicle.findOne({
+      where: applyTenantFilter(req, { id: vehicle_id }),
+    });
+
+    if (!vehicle) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Vehicle not found',
+      });
+    }
+
+    // Build filter
+    const whereClause = { vehicle_id };
+
+    if (cost_type) {
+      whereClause.cost_type = cost_type;
+    }
+
+    if (start_date || end_date) {
+      whereClause.incurred_date = {};
+      if (start_date) whereClause.incurred_date[Op.gte] = start_date;
+      if (end_date) whereClause.incurred_date[Op.lte] = end_date;
+    }
+
+    // Pagination
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const { count, rows: costs } = await VehicleCost.findAndCountAll({
+      where: whereClause,
+      limit: parseInt(limit),
+      offset: offset,
+      order: [['incurred_date', 'DESC']],
+    });
+
+    // Calculate total cost
+    const totalCost = costs.reduce((sum, cost) => sum + parseFloat(cost.amount), 0);
+
+    console.log(`💰 Fetched ${costs.length} costs for vehicle ${vehicle_id}`);
+
+    sendSuccess(res, {
+      message: 'Vehicle costs fetched successfully',
+      data: { 
+        costs,
+        total_cost: totalCost,
+      },
+      meta: {
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total_pages: Math.ceil(count / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Get vehicle costs error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch vehicle costs',
+      details: error.message,
+    });
+  }
+};
+
+module.exports = {
+  getAllVehicles,
+  getAvailableVehicles,
+  getVehicleById,
+  createVehicle,
+  updateVehicle,
+  deleteVehicle,
+  addVehicleCost,
+  getVehicleCosts,
+};
 
 
 //   [Folder] jobs
@@ -1265,7 +4203,207 @@ module.exports = {
 };
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\middleware\validation.middleware.js
+// src/middleware/validation.middleware.js
+const { body, param, query, validationResult } = require('express-validator');
+const { sendError } = require('../utils/response.util');
 
+/**
+ * Middleware to check validation results
+ * Use this after validation chains in routes
+ */
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return sendError(res, {
+      statusCode: 422,
+      message: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      details: errors.array(),
+    });
+  }
+  next();
+};
+
+/**
+ * Common validation chains for reuse
+ */
+const validations = {
+  // UUID validation
+  uuid: (field = 'id') => 
+    param(field).isUUID().withMessage(`${field} must be a valid UUID`),
+
+  // Pagination
+  pagination: [
+    query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+  ],
+
+  // Date range
+  dateRange: [
+    query('start_date').optional().isISO8601().withMessage('Valid start date required (ISO 8601)'),
+    query('end_date').optional().isISO8601().withMessage('Valid end date required (ISO 8601)'),
+  ],
+
+  // Vehicle fields
+  vehicle: {
+    brand: body('brand').notEmpty().withMessage('Brand is required').trim(),
+    model: body('model').notEmpty().withMessage('Model is required').trim(),
+    year: body('year')
+      .isInt({ min: 1900, max: new Date().getFullYear() + 1 })
+      .withMessage('Valid year required'),
+    registration: body('registration_number')
+      .notEmpty()
+      .withMessage('Registration number is required')
+      .trim(),
+    transmission: body('transmission')
+      .isIn(['manual', 'automatic'])
+      .withMessage('Transmission must be manual or automatic'),
+    fuel_type: body('fuel_type')
+      .isIn(['petrol', 'diesel', 'electric', 'hybrid'])
+      .withMessage('Valid fuel type required'),
+    seats: body('seats')
+      .isInt({ min: 1, max: 50 })
+      .withMessage('Seats must be between 1 and 50'),
+    daily_rate: body('daily_rate')
+      .isFloat({ min: 0 })
+      .withMessage('Daily rate must be a positive number'),
+    status: body('status')
+      .optional()
+      .isIn(['available', 'rented', 'maintenance', 'retired'])
+      .withMessage('Invalid status'),
+  },
+
+  // Customer fields
+  customer: {
+    full_name: body('full_name').notEmpty().withMessage('Full name is required').trim(),
+    email: body('email')
+      .optional()
+      .isEmail()
+      .withMessage('Valid email required')
+      .normalizeEmail(),
+    phone: body('phone')
+      .notEmpty()
+      .withMessage('Phone is required')
+      .matches(/^[+]?[0-9\s-()]+$/)
+      .withMessage('Valid phone number required'),
+    customer_type: body('customer_type')
+      .isIn(['individual', 'corporate'])
+      .withMessage('Customer type must be individual or corporate'),
+    license: body('drivers_license_number')
+      .optional()
+      .trim()
+      .isLength({ min: 5, max: 50 })
+      .withMessage('License number must be 5-50 characters'),
+  },
+
+  // Contract fields
+  contract: {
+    customer_id: body('customer_id').isUUID().withMessage('Valid customer ID required'),
+    vehicle_id: body('vehicle_id').isUUID().withMessage('Valid vehicle ID required'),
+    start_date: body('start_date').isISO8601().withMessage('Valid start date required'),
+    end_date: body('end_date').isISO8601().withMessage('Valid end date required'),
+    daily_rate: body('daily_rate')
+      .isFloat({ min: 0 })
+      .withMessage('Daily rate must be positive'),
+  },
+
+  // Payment fields
+  payment: {
+    amount: body('amount').isFloat({ min: 0 }).withMessage('Amount must be positive'),
+    payment_method: body('payment_method')
+      .isIn(['cash', 'card', 'bank_transfer', 'check', 'mobile_payment'])
+      .withMessage('Invalid payment method'),
+    payment_date: body('payment_date')
+      .optional()
+      .isISO8601()
+      .withMessage('Valid payment date required'),
+  },
+};
+
+/**
+ * Validate that end_date is after start_date
+ */
+const validateDateRange = (req, res, next) => {
+  const { start_date, end_date } = req.body;
+  
+  if (start_date && end_date) {
+    const start = new Date(start_date);
+    const end = new Date(end_date);
+    
+    if (end <= start) {
+      return sendError(res, {
+        statusCode: 422,
+        message: 'End date must be after start date',
+        code: 'INVALID_DATE_RANGE',
+      });
+    }
+  }
+  
+  next();
+};
+
+/**
+ * Sanitize input to prevent XSS
+ */
+const sanitizeInput = (req, res, next) => {
+  // Remove any HTML tags from string inputs
+  const sanitize = (obj) => {
+    for (let key in obj) {
+      if (typeof obj[key] === 'string') {
+        obj[key] = obj[key].replace(/<[^>]*>/g, '');
+      } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+        sanitize(obj[key]);
+      }
+    }
+  };
+
+  if (req.body) sanitize(req.body);
+  if (req.query) sanitize(req.query);
+  if (req.params) sanitize(req.params);
+
+  next();
+};
+
+/**
+ * Validate file upload
+ */
+const validateFileUpload = (allowedTypes = [], maxSize = 5 * 1024 * 1024) => {
+  return (req, res, next) => {
+    if (!req.file) {
+      return next(); // No file, skip validation
+    }
+
+    const file = req.file;
+
+    // Check file type
+    if (allowedTypes.length > 0 && !allowedTypes.includes(file.mimetype)) {
+      return sendError(res, {
+        statusCode: 422,
+        message: `Invalid file type. Allowed: ${allowedTypes.join(', ')}`,
+        code: 'INVALID_FILE_TYPE',
+      });
+    }
+
+    // Check file size
+    if (file.size > maxSize) {
+      return sendError(res, {
+        statusCode: 422,
+        message: `File too large. Maximum size: ${maxSize / (1024 * 1024)}MB`,
+        code: 'FILE_TOO_LARGE',
+      });
+    }
+
+    next();
+  };
+};
+
+module.exports = {
+  handleValidationErrors,
+  validations,
+  validateDateRange,
+  sanitizeInput,
+  validateFileUpload,
+};
 
 
 //   [Folder] models
@@ -2118,7 +5256,161 @@ module.exports = VehicleCost;
 
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\routes\analytics.routes.js
+// src/routes/analytics.routes.js
+const express = require('express');
+const router = express.Router();
+const {
+  getDashboard,
+  getRevenue,
+  getVehiclePerformance,
+  getVehicleUtilization,
+  getVehicleProfitLoss,
+  getCustomerAnalytics,
+  getCustomerSegmentation,
+  getCustomerRetention,
+} = require('../controllers/analytics.controller');
+const { authenticateToken } = require('../middleware/auth.middleware');
+const { requireRole } = require('../middleware/permissions.middleware');
+const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
 
+// Apply authentication and tenant isolation to ALL routes
+router.use(authenticateToken);
+router.use(injectCompanyId);
+
+// ============================================
+// DASHBOARD & OVERVIEW
+// ============================================
+
+/**
+ * GET /api/analytics/dashboard
+ * Get comprehensive dashboard KPIs
+ * Query params:
+ *   - period: 'today' | 'week' | 'month' | 'quarter' | 'year'
+ *   - start_date: ISO date string (optional)
+ *   - end_date: ISO date string (optional)
+ * 
+ * Access: All authenticated users
+ */
+router.get('/dashboard', getDashboard);
+
+// ============================================
+// REVENUE ANALYTICS
+// ============================================
+
+/**
+ * GET /api/analytics/revenue
+ * Get detailed revenue analytics
+ * Query params:
+ *   - period: 'today' | 'week' | 'month' | 'quarter' | 'year'
+ *   - start_date: ISO date string (optional)
+ *   - end_date: ISO date string (optional)
+ *   - compare: boolean (compare with previous period)
+ * 
+ * Access: Owner, Admin, Manager
+ */
+router.get(
+  '/revenue',
+  requireRole(['owner', 'admin', 'manager']),
+  getRevenue
+);
+
+// ============================================
+// VEHICLE ANALYTICS
+// ============================================
+
+/**
+ * GET /api/analytics/vehicles
+ * Get vehicle performance overview
+ * Query params:
+ *   - period: 'today' | 'week' | 'month' | 'quarter' | 'year'
+ *   - start_date: ISO date string (optional)
+ *   - end_date: ISO date string (optional)
+ *   - metric: 'utilization' | 'revenue' | 'profit'
+ *   - limit: number (default 10)
+ * 
+ * Access: All authenticated users
+ */
+router.get('/vehicles', getVehiclePerformance);
+
+/**
+ * GET /api/analytics/vehicles/utilization
+ * Get detailed vehicle utilization rates
+ * Query params:
+ *   - period: 'today' | 'week' | 'month' | 'quarter' | 'year'
+ *   - start_date: ISO date string (optional)
+ *   - end_date: ISO date string (optional)
+ *   - vehicle_id: UUID (filter by specific vehicle)
+ * 
+ * Access: All authenticated users
+ */
+router.get('/vehicles/utilization', getVehicleUtilization);
+
+/**
+ * GET /api/analytics/vehicles/profit-loss
+ * Get vehicle profit & loss analysis
+ * Query params:
+ *   - period: 'month' | 'quarter' | 'year'
+ *   - start_date: ISO date string (optional)
+ *   - end_date: ISO date string (optional)
+ * 
+ * Access: Owner, Admin, Manager
+ */
+router.get(
+  '/vehicles/profit-loss',
+  requireRole(['owner', 'admin', 'manager']),
+  getVehicleProfitLoss
+);
+
+// ============================================
+// CUSTOMER ANALYTICS
+// ============================================
+
+/**
+ * GET /api/analytics/customers
+ * Get comprehensive customer analytics (segmentation + retention)
+ * Query params:
+ *   - period: 'week' | 'month' | 'quarter' | 'year'
+ *   - start_date: ISO date string (optional)
+ *   - end_date: ISO date string (optional)
+ * 
+ * Access: Owner, Admin, Manager
+ */
+router.get(
+  '/customers',
+  requireRole(['owner', 'admin', 'manager']),
+  getCustomerAnalytics
+);
+
+/**
+ * GET /api/analytics/customers/segmentation
+ * Get customer segmentation by value
+ * No query params (uses all-time data)
+ * 
+ * Access: Owner, Admin, Manager
+ */
+router.get(
+  '/customers/segmentation',
+  requireRole(['owner', 'admin', 'manager']),
+  getCustomerSegmentation
+);
+
+/**
+ * GET /api/analytics/customers/retention
+ * Get customer retention metrics
+ * Query params:
+ *   - period: 'week' | 'month' | 'quarter' | 'year'
+ *   - start_date: ISO date string (optional)
+ *   - end_date: ISO date string (optional)
+ * 
+ * Access: Owner, Admin, Manager
+ */
+router.get(
+  '/customers/retention',
+  requireRole(['owner', 'admin', 'manager']),
+  getCustomerRetention
+);
+
+module.exports = router;
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\routes\auth.routes.js
 // src/routes/auth.routes.js
@@ -2189,23 +5481,772 @@ router.put('/settings', updateSettings);
 module.exports = router;
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\routes\contract.routes.js
+// src/routes/contract.routes.js
+const express = require('express');
+const router = express.Router();
+const {
+  getAllContracts,
+  getContractById,
+  createContract,
+  updateContract,
+  completeContract,
+  cancelContract,
+  extendContract,
+  getContractStats,
+} = require('../controllers/contract.controller');
+const { authenticateToken } = require('../middleware/auth.middleware');
+const { requireRole } = require('../middleware/permissions.middleware');
+const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
+const { getContractPayments } = require('../controllers/payment.controller');
 
+// Apply authentication and tenant isolation to ALL routes
+router.use(authenticateToken);
+router.use(injectCompanyId);
+
+// ============================================
+// CONTRACT ROUTES
+// ============================================
+
+// GET /api/contracts/stats - Get statistics
+// Must be BEFORE /:id to avoid matching 'stats' as an ID
+router.get('/stats', getContractStats);
+
+// GET /api/contracts - List all contracts
+// All authenticated users can view contracts
+router.get('/', getAllContracts);
+
+// GET /api/contracts/:id - Get single contract
+router.get('/:id', getContractById);
+
+// POST /api/contracts - Create new contract
+// All users can create contracts
+router.post('/', createContract);
+
+// PUT /api/contracts/:id - Update contract
+// Only owners, admins, managers, and staff can update
+router.put('/:id', requireRole(['owner', 'admin', 'manager', 'staff']), updateContract);
+
+// POST /api/contracts/:id/complete - Complete rental
+// Only owners, admins, managers, and staff can complete
+router.post('/:id/complete', requireRole(['owner', 'admin', 'manager', 'staff']), completeContract);
+
+// POST /api/contracts/:id/cancel - Cancel contract
+// Only owners, admins, and managers can cancel
+router.post('/:id/cancel', requireRole(['owner', 'admin', 'manager']), cancelContract);
+
+// POST /api/contracts/:id/extend - Extend rental period
+// Only owners, admins, managers, and staff can extend
+router.post('/:id/extend', requireRole(['owner', 'admin', 'manager', 'staff']), extendContract);
+
+
+// GET /api/contracts/:id/payments - Get all payments for a contract
+router.get('/:id/payments', getContractPayments);
+
+module.exports = router;
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\routes\customer.routes.js
+// src/routes/customer.routes.js
+const express = require('express');
+const router = express.Router();
+const {
+  getAllCustomers,
+  getCustomerById,
+  getCustomerHistory,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+  getCustomerStats,
+} = require('../controllers/customer.controller');
+const { authenticateToken } = require('../middleware/auth.middleware');
+const { requireRole } = require('../middleware/permissions.middleware');
+const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
 
+// Apply authentication and tenant isolation to ALL routes
+router.use(authenticateToken);
+router.use(injectCompanyId);
+
+// ============================================
+// CUSTOMER ROUTES
+// ============================================
+
+// GET /api/customers/stats - Get customer statistics
+// Must be BEFORE /:id route to avoid matching 'stats' as an ID
+router.get('/stats', getCustomerStats);
+
+// GET /api/customers - List all customers (with filters & search)
+// All authenticated users can view customers
+router.get('/', getAllCustomers);
+
+// GET /api/customers/:id - Get single customer
+router.get('/:id', getCustomerById);
+
+// GET /api/customers/:id/history - Get customer rental history
+router.get('/:id/history', getCustomerHistory);
+
+// POST /api/customers - Create customer
+// All users can create customers (staff need to register walk-ins)
+router.post('/', createCustomer);
+
+// PUT /api/customers/:id - Update customer
+// Only owners, admins, managers, and staff can update
+router.put('/:id', requireRole(['owner', 'admin', 'manager', 'staff']), updateCustomer);
+
+// DELETE /api/customers/:id - Delete customer
+// Only owners and admins can delete customers
+router.delete('/:id', requireRole(['owner', 'admin']), deleteCustomer);
+
+module.exports = router;
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\routes\payment.routes.js
+// src/routes/payment.routes.js
+const express = require('express');
+const router = express.Router();
+const {
+  getAllPayments,
+  getPaymentById,
+  createPayment,
+  updatePayment,
+  getOutstandingPayments,
+  getContractPayments,
+  getPaymentStats,
+} = require('../controllers/payment.controller');
+const { authenticateToken } = require('../middleware/auth.middleware');
+const { requireRole } = require('../middleware/permissions.middleware');
+const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
 
+// Apply authentication and tenant isolation to ALL routes
+router.use(authenticateToken);
+router.use(injectCompanyId);
+
+// ============================================
+// PAYMENT ROUTES
+// ============================================
+
+// GET /api/payments/stats - Get payment statistics
+// Must be BEFORE /:id route to avoid matching 'stats' as an ID
+router.get('/stats', getPaymentStats);
+
+// GET /api/payments/outstanding - Get outstanding payments
+// Must be BEFORE /:id route to avoid matching 'outstanding' as an ID
+router.get('/outstanding', getOutstandingPayments);
+
+// GET /api/payments - List all payments
+// All authenticated users can view payments
+router.get('/', getAllPayments);
+
+// GET /api/payments/:id - Get single payment
+router.get('/:id', getPaymentById);
+
+// POST /api/payments - Record new payment
+// Only owners, admins, managers, and staff can record payments
+router.post('/', requireRole(['owner', 'admin', 'manager', 'staff']), createPayment);
+
+// PUT /api/payments/:id - Update payment
+// Only owners, admins, and managers can update payments
+router.put('/:id', requireRole(['owner', 'admin', 'manager']), updatePayment);
+
+module.exports = router;
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\routes\vehicle.routes.js
+// src/routes/vehicle.routes.js
+const express = require('express');
+const router = express.Router();
+const {
+  getAllVehicles,
+  getAvailableVehicles,
+  getVehicleById,
+  createVehicle,
+  updateVehicle,
+  deleteVehicle,
+  addVehicleCost,
+  getVehicleCosts,
+} = require('../controllers/vehicle.controller');
+const { authenticateToken } = require('../middleware/auth.middleware');
+const { requireRole } = require('../middleware/permissions.middleware');
+const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
 
+// Apply authentication and tenant isolation to ALL routes
+router.use(authenticateToken);
+router.use(injectCompanyId);
+
+// ============================================
+// VEHICLE ROUTES
+// ============================================
+
+// GET /api/vehicles - List all vehicles (with filters)
+// All authenticated users can view vehicles
+router.get('/', getAllVehicles);
+
+// GET /api/vehicles/available - Get available vehicles
+// Must be BEFORE /:id route to avoid matching 'available' as an ID
+router.get('/available', getAvailableVehicles);
+
+// GET /api/vehicles/:id - Get single vehicle
+router.get('/:id', getVehicleById);
+
+// POST /api/vehicles - Create vehicle
+// Only owners, admins, and managers can create vehicles
+router.post('/', requireRole(['owner', 'admin', 'manager']), createVehicle);
+
+// PUT /api/vehicles/:id - Update vehicle
+// Only owners, admins, and managers can update vehicles
+router.put('/:id', requireRole(['owner', 'admin', 'manager']), updateVehicle);
+
+// DELETE /api/vehicles/:id - Delete vehicle (soft delete)
+// Only owners and admins can delete vehicles
+router.delete('/:id', requireRole(['owner', 'admin']), deleteVehicle);
+
+// ============================================
+// VEHICLE COST ROUTES
+// ============================================
+
+// POST /api/vehicles/:id/costs - Add vehicle cost
+// Only owners, admins, and managers can add costs
+router.post('/:id/costs', requireRole(['owner', 'admin', 'manager']), addVehicleCost);
+
+// GET /api/vehicles/:id/costs - Get cost history
+// All authenticated users can view costs
+router.get('/:id/costs', getVehicleCosts);
+
+module.exports = router;
 
 
 //   [Folder] services
 
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\services\analytics.service.js
+// src/services/analytics.service.js
+const { Contract, Payment, Vehicle, Customer, VehicleCost, sequelize } = require('../models');
+const { Op } = require('sequelize');
 
+/**
+ * Analytics Service
+ * Provides business intelligence calculations for the car rental system
+ */
+
+// ============================================
+// REVENUE ANALYTICS
+// ============================================
+
+/**
+ * Calculate revenue for a given period
+ * @param {string} companyId - Company UUID
+ * @param {Date} startDate - Start of period
+ * @param {Date} endDate - End of period
+ * @returns {Object} Revenue breakdown
+ */
+const calculateRevenue = async (companyId, startDate, endDate) => {
+  try {
+    // Total revenue from completed payments
+    const revenueResult = await Payment.findOne({
+      where: {
+        company_id: companyId,
+        status: 'completed',
+        payment_date: {
+          [Op.between]: [startDate, endDate],
+        },
+      },
+      attributes: [
+        [sequelize.fn('SUM', sequelize.col('amount')), 'total_revenue'],
+        [sequelize.fn('COUNT', sequelize.col('id')), 'payment_count'],
+      ],
+      raw: true,
+    });
+
+    // Revenue by payment method
+    const revenueByMethod = await Payment.findAll({
+      where: {
+        company_id: companyId,
+        status: 'completed',
+        payment_date: {
+          [Op.between]: [startDate, endDate],
+        },
+      },
+      attributes: [
+        'payment_method',
+        [sequelize.fn('SUM', sequelize.col('amount')), 'amount'],
+        [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
+      ],
+      group: ['payment_method'],
+      raw: true,
+    });
+
+    // Revenue by day (for trend analysis)
+    const revenueByDay = await Payment.findAll({
+      where: {
+        company_id: companyId,
+        status: 'completed',
+        payment_date: {
+          [Op.between]: [startDate, endDate],
+        },
+      },
+      attributes: [
+        [sequelize.fn('DATE', sequelize.col('payment_date')), 'date'],
+        [sequelize.fn('SUM', sequelize.col('amount')), 'revenue'],
+        [sequelize.fn('COUNT', sequelize.col('id')), 'transactions'],
+      ],
+      group: [sequelize.fn('DATE', sequelize.col('payment_date'))],
+      order: [[sequelize.fn('DATE', sequelize.col('payment_date')), 'ASC']],
+      raw: true,
+    });
+
+    // Average transaction value
+    const avgTransactionValue = revenueResult?.total_revenue && revenueResult?.payment_count
+      ? parseFloat(revenueResult.total_revenue) / parseInt(revenueResult.payment_count)
+      : 0;
+
+    return {
+      total_revenue: parseFloat(revenueResult?.total_revenue || 0),
+      payment_count: parseInt(revenueResult?.payment_count || 0),
+      average_transaction_value: avgTransactionValue,
+      revenue_by_method: revenueByMethod.map(r => ({
+        method: r.payment_method,
+        amount: parseFloat(r.amount),
+        count: parseInt(r.count),
+      })),
+      revenue_by_day: revenueByDay.map(r => ({
+        date: r.date,
+        revenue: parseFloat(r.revenue),
+        transactions: parseInt(r.transactions),
+      })),
+    };
+  } catch (error) {
+    console.error('💥 Calculate revenue error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get revenue comparison with previous period
+ * @param {string} companyId 
+ * @param {Date} currentStart 
+ * @param {Date} currentEnd 
+ * @returns {Object} Revenue comparison
+ */
+const getRevenueComparison = async (companyId, currentStart, currentEnd) => {
+  try {
+    const periodLength = currentEnd - currentStart;
+    const previousStart = new Date(currentStart.getTime() - periodLength);
+    const previousEnd = new Date(currentStart.getTime());
+
+    const currentRevenue = await calculateRevenue(companyId, currentStart, currentEnd);
+    const previousRevenue = await calculateRevenue(companyId, previousStart, previousEnd);
+
+    const growth = previousRevenue.total_revenue > 0
+      ? ((currentRevenue.total_revenue - previousRevenue.total_revenue) / previousRevenue.total_revenue) * 100
+      : 0;
+
+    return {
+      current_period: currentRevenue,
+      previous_period: previousRevenue,
+      growth_percentage: growth,
+    };
+  } catch (error) {
+    console.error('💥 Revenue comparison error:', error);
+    throw error;
+  }
+};
+
+// ============================================
+// VEHICLE ANALYTICS
+// ============================================
+
+/**
+ * Calculate vehicle utilization rates
+ * @param {string} companyId 
+ * @param {Date} startDate 
+ * @param {Date} endDate 
+ * @returns {Array} Vehicle utilization data
+ */
+const calculateVehicleUtilization = async (companyId, startDate, endDate) => {
+  try {
+    const vehicles = await Vehicle.findAll({
+      where: { company_id: companyId },
+      attributes: ['id', 'brand', 'model', 'registration_number', 'daily_rate', 'status'],
+    });
+
+    const periodDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+
+    const utilizationData = await Promise.all(
+      vehicles.map(async (vehicle) => {
+        // Count days rented
+        const contracts = await Contract.findAll({
+          where: {
+            vehicle_id: vehicle.id,
+            status: { [Op.in]: ['active', 'completed'] },
+            [Op.or]: [
+              {
+                start_date: { [Op.between]: [startDate, endDate] },
+              },
+              {
+                end_date: { [Op.between]: [startDate, endDate] },
+              },
+              {
+                [Op.and]: [
+                  { start_date: { [Op.lte]: startDate } },
+                  { end_date: { [Op.gte]: endDate } },
+                ],
+              },
+            ],
+          },
+          attributes: ['start_date', 'end_date', 'total_amount'],
+        });
+
+        let totalDaysRented = 0;
+        let totalRevenue = 0;
+
+        contracts.forEach(contract => {
+          const contractStart = new Date(Math.max(contract.start_date, startDate));
+          const contractEnd = new Date(Math.min(contract.end_date, endDate));
+          const daysRented = Math.ceil((contractEnd - contractStart) / (1000 * 60 * 60 * 24)) + 1;
+          totalDaysRented += daysRented;
+          totalRevenue += parseFloat(contract.total_amount);
+        });
+
+        const utilizationRate = (totalDaysRented / periodDays) * 100;
+        const revenuePerDay = totalDaysRented > 0 ? totalRevenue / totalDaysRented : 0;
+
+        return {
+          vehicle_id: vehicle.id,
+          brand: vehicle.brand,
+          model: vehicle.model,
+          registration_number: vehicle.registration_number,
+          daily_rate: parseFloat(vehicle.daily_rate),
+          current_status: vehicle.status,
+          total_days_rented: totalDaysRented,
+          available_days: periodDays - totalDaysRented,
+          utilization_rate: utilizationRate,
+          total_revenue: totalRevenue,
+          revenue_per_day: revenuePerDay,
+          rental_count: contracts.length,
+        };
+      })
+    );
+
+    // Sort by utilization rate
+    utilizationData.sort((a, b) => b.utilization_rate - a.utilization_rate);
+
+    return utilizationData;
+  } catch (error) {
+    console.error('💥 Calculate vehicle utilization error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get top performing vehicles
+ * @param {string} companyId 
+ * @param {Date} startDate 
+ * @param {Date} endDate 
+ * @param {number} limit 
+ * @returns {Array} Top vehicles
+ */
+const getTopPerformingVehicles = async (companyId, startDate, endDate, limit = 10) => {
+  try {
+    const vehicles = await calculateVehicleUtilization(companyId, startDate, endDate);
+    return vehicles.slice(0, limit);
+  } catch (error) {
+    console.error('💥 Get top vehicles error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Calculate profit/loss for vehicles
+ * @param {string} companyId 
+ * @param {Date} startDate 
+ * @param {Date} endDate 
+ * @returns {Array} Vehicle P&L
+ */
+const calculateVehicleProfitLoss = async (companyId, startDate, endDate) => {
+  try {
+    const utilization = await calculateVehicleUtilization(companyId, startDate, endDate);
+
+    const profitLossData = await Promise.all(
+      utilization.map(async (vehicle) => {
+        // Get costs for this vehicle
+        const costs = await VehicleCost.findAll({
+          where: {
+            vehicle_id: vehicle.vehicle_id,
+            incurred_date: {
+              [Op.between]: [startDate, endDate],
+            },
+          },
+          attributes: [
+            'cost_type',
+            [sequelize.fn('SUM', sequelize.col('amount')), 'total'],
+          ],
+          group: ['cost_type'],
+          raw: true,
+        });
+
+        const totalCosts = costs.reduce((sum, cost) => sum + parseFloat(cost.total), 0);
+        const profit = vehicle.total_revenue - totalCosts;
+        const profitMargin = vehicle.total_revenue > 0 ? (profit / vehicle.total_revenue) * 100 : 0;
+
+        return {
+          ...vehicle,
+          total_costs: totalCosts,
+          costs_by_type: costs.map(c => ({
+            type: c.cost_type,
+            amount: parseFloat(c.total),
+          })),
+          profit: profit,
+          profit_margin: profitMargin,
+        };
+      })
+    );
+
+    // Sort by profit
+    profitLossData.sort((a, b) => b.profit - a.profit);
+
+    return profitLossData;
+  } catch (error) {
+    console.error('💥 Calculate vehicle P&L error:', error);
+    throw error;
+  }
+};
+
+// ============================================
+// CUSTOMER ANALYTICS
+// ============================================
+
+/**
+ * Segment customers by value
+ * @param {string} companyId 
+ * @returns {Object} Customer segmentation
+ */
+const segmentCustomers = async (companyId) => {
+  try {
+    const customers = await Customer.findAll({
+      where: { company_id: companyId },
+      attributes: [
+        'id',
+        'full_name',
+        'email',
+        'customer_type',
+        'total_rentals',
+        'lifetime_value',
+        'created_at',
+      ],
+      order: [['lifetime_value', 'DESC']],
+    });
+
+    // Calculate quartiles
+    const sortedByValue = customers.map(c => parseFloat(c.lifetime_value)).sort((a, b) => a - b);
+    const q1 = sortedByValue[Math.floor(sortedByValue.length * 0.25)];
+    const q2 = sortedByValue[Math.floor(sortedByValue.length * 0.5)];
+    const q3 = sortedByValue[Math.floor(sortedByValue.length * 0.75)];
+
+    const segmented = {
+      vip: customers.filter(c => parseFloat(c.lifetime_value) >= q3),
+      high_value: customers.filter(c => parseFloat(c.lifetime_value) >= q2 && parseFloat(c.lifetime_value) < q3),
+      medium_value: customers.filter(c => parseFloat(c.lifetime_value) >= q1 && parseFloat(c.lifetime_value) < q2),
+      low_value: customers.filter(c => parseFloat(c.lifetime_value) < q1),
+    };
+
+    return {
+      total_customers: customers.length,
+      segments: {
+        vip: {
+          count: segmented.vip.length,
+          total_value: segmented.vip.reduce((sum, c) => sum + parseFloat(c.lifetime_value), 0),
+          customers: segmented.vip.slice(0, 10), // Top 10 VIPs
+        },
+        high_value: {
+          count: segmented.high_value.length,
+          total_value: segmented.high_value.reduce((sum, c) => sum + parseFloat(c.lifetime_value), 0),
+        },
+        medium_value: {
+          count: segmented.medium_value.length,
+          total_value: segmented.medium_value.reduce((sum, c) => sum + parseFloat(c.lifetime_value), 0),
+        },
+        low_value: {
+          count: segmented.low_value.length,
+          total_value: segmented.low_value.reduce((sum, c) => sum + parseFloat(c.lifetime_value), 0),
+        },
+      },
+    };
+  } catch (error) {
+    console.error('💥 Segment customers error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get customer retention metrics
+ * @param {string} companyId 
+ * @param {Date} startDate 
+ * @param {Date} endDate 
+ * @returns {Object} Retention metrics
+ */
+const getCustomerRetention = async (companyId, startDate, endDate) => {
+  try {
+    // New customers in period
+    const newCustomers = await Customer.count({
+      where: {
+        company_id: companyId,
+        created_at: {
+          [Op.between]: [startDate, endDate],
+        },
+      },
+    });
+
+    // Repeat customers (had rentals before and during period)
+    const repeatCustomers = await Customer.count({
+      where: {
+        company_id: companyId,
+        created_at: { [Op.lt]: startDate },
+        total_rentals: { [Op.gt]: 1 },
+      },
+      include: [
+        {
+          model: Contract,
+          as: 'contracts',
+          where: {
+            start_date: {
+              [Op.between]: [startDate, endDate],
+            },
+          },
+          required: true,
+        },
+      ],
+      distinct: true,
+    });
+
+    // Total active customers
+    const totalActiveCustomers = await Customer.count({
+      where: { company_id: companyId },
+      include: [
+        {
+          model: Contract,
+          as: 'contracts',
+          where: {
+            start_date: {
+              [Op.between]: [startDate, endDate],
+            },
+          },
+          required: true,
+        },
+      ],
+      distinct: true,
+    });
+
+    const retentionRate = totalActiveCustomers > 0
+      ? (repeatCustomers / totalActiveCustomers) * 100
+      : 0;
+
+    return {
+      new_customers: newCustomers,
+      repeat_customers: repeatCustomers,
+      total_active_customers: totalActiveCustomers,
+      retention_rate: retentionRate,
+    };
+  } catch (error) {
+    console.error('💥 Get customer retention error:', error);
+    throw error;
+  }
+};
+
+// ============================================
+// DASHBOARD KPIs
+// ============================================
+
+/**
+ * Get comprehensive dashboard KPIs
+ * @param {string} companyId 
+ * @param {Date} startDate 
+ * @param {Date} endDate 
+ * @returns {Object} Dashboard data
+ */
+const getDashboardKPIs = async (companyId, startDate, endDate) => {
+  try {
+    // Run all analytics in parallel
+    const [
+      revenue,
+      vehicleUtilization,
+      customerSegmentation,
+      customerRetention,
+      activeContracts,
+      totalVehicles,
+      maintenanceVehicles,
+    ] = await Promise.all([
+      calculateRevenue(companyId, startDate, endDate),
+      calculateVehicleUtilization(companyId, startDate, endDate),
+      segmentCustomers(companyId),
+      getCustomerRetention(companyId, startDate, endDate),
+      Contract.count({
+        where: {
+          company_id: companyId,
+          status: 'active',
+        },
+      }),
+      Vehicle.count({
+        where: { company_id: companyId },
+      }),
+      Vehicle.count({
+        where: {
+          company_id: companyId,
+          status: 'maintenance',
+        },
+      }),
+    ]);
+
+    // Calculate fleet-wide utilization
+    const avgUtilization = vehicleUtilization.length > 0
+      ? vehicleUtilization.reduce((sum, v) => sum + v.utilization_rate, 0) / vehicleUtilization.length
+      : 0;
+
+    const availableVehicles = totalVehicles - activeContracts - maintenanceVehicles;
+
+    return {
+      period: {
+        start: startDate,
+        end: endDate,
+      },
+      revenue: {
+        total: revenue.total_revenue,
+        average_transaction: revenue.average_transaction_value,
+        payment_count: revenue.payment_count,
+      },
+      fleet: {
+        total_vehicles: totalVehicles,
+        active_rentals: activeContracts,
+        available_vehicles: availableVehicles,
+        maintenance_vehicles: maintenanceVehicles,
+        average_utilization: avgUtilization,
+      },
+      customers: {
+        total: customerSegmentation.total_customers,
+        new: customerRetention.new_customers,
+        repeat: customerRetention.repeat_customers,
+        retention_rate: customerRetention.retention_rate,
+      },
+      top_vehicles: vehicleUtilization.slice(0, 5),
+    };
+  } catch (error) {
+    console.error('💥 Get dashboard KPIs error:', error);
+    throw error;
+  }
+};
+
+module.exports = {
+  // Revenue
+  calculateRevenue,
+  getRevenueComparison,
+  
+  // Vehicles
+  calculateVehicleUtilization,
+  getTopPerformingVehicles,
+  calculateVehicleProfitLoss,
+  
+  // Customers
+  segmentCustomers,
+  getCustomerRetention,
+  
+  // Dashboard
+  getDashboardKPIs,
+};
 
 // C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-backend\src\services\email.service.js
 
@@ -2394,9 +6435,16 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 require('dotenv').config();
+
+// Import routes
 const authRoutes = require('./routes/auth.routes');
 const companyRoutes = require('./routes/company.routes');
 const protectedCompanyRoutes = require('./routes/companyProfile.routes');
+const vehicleRoutes = require('./routes/vehicle.routes');
+const customerRoutes = require('./routes/customer.routes');
+const contractRoutes = require('./routes/contract.routes');
+const paymentRoutes = require('./routes/payment.routes');
+const analyticsRoutes = require('./routes/analytics.routes');
 
 const app = express();
 
@@ -2404,50 +6452,51 @@ const app = express();
 app.use(helmet());
 
 // 2. CORS (Cross-Origin Resource Sharing) - Configure for your frontend
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000'; // Set in .env
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 app.use(cors({
   origin: FRONTEND_URL,
-  optionsSuccessStatus: 200, // For legacy browser support
+  optionsSuccessStatus: 200,
 }));
 
-// 3. Logging (Morgan) - Use 'dev' format in development
+// 3. Logging (Morgan)
 const NODE_ENV = process.env.NODE_ENV || 'development';
 app.use(morgan(NODE_ENV === 'development' ? 'dev' : 'combined'));
 
-// 4. Body parsing (JSON and URL-encoded)
-app.use(express.json({ limit: '10mb' })); // Adjust limit as needed (e.g., for file uploads later)
+// 4. Body parsing
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Basic health check route
+// Health check routes
 app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running' });
 });
 
-// Add a ping route for API testing
 app.get('/api/ping', (req, res) => {
   res.json({ pong: true });
 });
 
+// API Routes
 app.use('/api/auth', authRoutes);
-
 app.use('/api/companies', companyRoutes);
 app.use('/api/company', protectedCompanyRoutes);
+app.use('/api/vehicles', vehicleRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/contracts', contractRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
-// 404 Handler (for unmatched routes)
+// 404 Handler
 app.use((req, res, next) => {
   res.status(404).json({ error: 'Not Found', path: req.originalUrl });
 });
 
 // Global Error Handler
 app.use((err, req, res, next) => {
-  // Log the error (use your logging.middleware.js later if expanded)
   console.error('❌ Server Error:', err);
-
-  // Don't expose stack in production
   const isDev = NODE_ENV === 'development';
   res.status(err.status || 500).json({
     error: err.message || 'Internal Server Error',
-    ...(isDev && { stack: err.stack }), // Only in dev
+    ...(isDev && { stack: err.stack }),
   });
 });
 
