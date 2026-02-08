@@ -270,4 +270,12 @@ export const analyticsAPI = {
   ): Promise<any> => {
     return apiFetch<any>('/customers/retention', params)
   },
+
+  getContractStats: async (params?: AnalyticsPeriod): Promise<ContractAnalytics> => {
+    return apiFetch<ContractAnalytics>('/contracts', params)
+  },
+
+  getPaymentStats: async (params?: AnalyticsPeriod): Promise<PaymentAnalytics> => {
+    return apiFetch<PaymentAnalytics>('/payments', params)
+  },
 }
