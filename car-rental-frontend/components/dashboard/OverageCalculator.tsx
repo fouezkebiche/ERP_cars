@@ -92,12 +92,10 @@ export function OverageCalculator({
       )}
 
       {/* Error State */}
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="w-4 h-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      <div className="p-4 rounded-lg border-l-4 border-destructive bg-destructive/10 flex items-start gap-2">
+        <AlertCircle className="w-4 h-4 text-destructive mt-1" />
+        <div>{error}</div>
+      </div>
 
       {/* Estimate Results */}
       {estimate && !loading && (
@@ -143,31 +141,29 @@ export function OverageCalculator({
 
           {/* Overage Warning */}
           {hasOverage ? (
-            <Alert variant="destructive">
-              <AlertCircle className="w-4 h-4" />
-              <AlertDescription>
-                <div className="space-y-2">
-                  <p className="font-semibold">Overage Detected!</p>
-                  <div className="text-sm space-y-1">
-                    <p>KM over limit: {kmOverage.toLocaleString()} km</p>
-                    <p>
-                      Base charge: {estimate.estimated_overage.base_overage_charges.toLocaleString()} DZD
-                    </p>
-                    {estimate.estimated_overage.discount_amount > 0 && (
-                      <p className="text-green-600 flex items-center gap-1">
-                        <TrendingDown className="w-3 h-3" />
-                        {estimate.estimated_overage.tier_name} discount (-
-                        {estimate.estimated_overage.discount_percentage}%): -
-                        {estimate.estimated_overage.discount_amount.toLocaleString()} DZD
-                      </p>
-                    )}
-                    <p className="font-bold text-lg pt-2">
-                      Final overage charge: {estimate.estimated_overage.final_overage_charges.toLocaleString()} DZD
-                    </p>
-                  </div>
-                </div>
-              </AlertDescription>
-            </Alert>
+            <div className="p-4 rounded-lg border-l-4 border-destructive bg-destructive/10 flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-destructive" />
+                <p className="font-semibold">Overage Detected!</p>
+              </div>
+              <div className="text-sm space-y-1">
+                <p>KM over limit: {kmOverage.toLocaleString()} km</p>
+                <p>
+                  Base charge: {estimate.estimated_overage.base_overage_charges.toLocaleString()} DZD
+                </p>
+                {estimate.estimated_overage.discount_amount > 0 && (
+                  <p className="text-green-600 flex items-center gap-1">
+                    <TrendingDown className="w-3 h-3" />
+                    {estimate.estimated_overage.tier_name} discount (-
+                    {estimate.estimated_overage.discount_percentage}%): -
+                    {estimate.estimated_overage.discount_amount.toLocaleString()} DZD
+                  </p>
+                )}
+                <p className="font-bold text-lg pt-2">
+                  Final overage charge: {estimate.estimated_overage.final_overage_charges.toLocaleString()} DZD
+                </p>
+              </div>
+            </div>
           ) : (
             <Alert className="border-green-500 bg-green-50 dark:bg-green-950">
               <AlertDescription className="text-green-700 dark:text-green-300">
