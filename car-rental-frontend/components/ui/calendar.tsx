@@ -3,7 +3,6 @@
 import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { DayPicker, type DayPickerProps } from "react-day-picker"
-
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
 
@@ -15,18 +14,31 @@ export function Calendar({
   showOutsideDays = true,
   ...props
 }: CalendarProps) {
-  // Custom NavButton
-  const CustomNavButton: React.FC<{ direction: "prev" | "next" }> = ({ direction }) => {
+  // Custom navbar with left/right buttons
+  const Navbar: React.FC<{ className?: string }> = () => {
     return (
-      <button
-        type="button"
-        className={cn(
-          buttonVariants({ variant: "outline" }),
-          "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100"
-        )}
-      >
-        {direction === "prev" ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-      </button>
+      <div className="flex justify-between items-center mb-2">
+        <button
+          type="button"
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "h-7 w-7 p-0 opacity-50 hover:opacity-100"
+          )}
+          onClick={() => props?.onPrevMonth?.()}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "h-7 w-7 p-0 opacity-50 hover:opacity-100"
+          )}
+          onClick={() => props?.onNextMonth?.()}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
     )
   }
 
@@ -39,9 +51,6 @@ export function Calendar({
         month: "space-y-4",
         caption: "flex justify-center pt-1 relative items-center",
         caption_label: "text-sm font-medium",
-        nav: "flex justify-between items-center",
-        nav_button_previous: "absolute left-1",
-        nav_button_next: "absolute right-1",
         table: "w-full border-collapse space-y-1",
         head_row: "flex",
         head_cell: "text-muted-foreground rounded-md w-9 font-normal text-[0.8rem]",
@@ -63,10 +72,22 @@ export function Calendar({
         day_hidden: "invisible",
         ...classNames,
       }}
-      components={{
-        IconLeft: () => <ChevronLeft className="h-4 w-4" />,
-        IconRight: () => <ChevronRight className="h-4 w-4" />,
-      }}
+      navbar={({ onPreviousClick, onNextClick }) => (
+        <div className="flex justify-between mb-2">
+          <button
+            onClick={onPreviousClick}
+            className={cn(buttonVariants({ variant: "outline" }), "h-7 w-7 p-0")}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            onClick={onNextClick}
+            className={cn(buttonVariants({ variant: "outline" }), "h-7 w-7 p-0")}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
       {...props}
     />
   )
