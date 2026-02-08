@@ -42,22 +42,23 @@ export default function CustomerFormPage() {
           const response = await customerApi.getById(customerId)
           const customer = response.data.customer
           setFormData({
-            customer_type: customer.customer_type,
-            full_name: customer.full_name,
-            company_name: customer.company_name || "",
-            email: customer.email || "",
-            phone: customer.phone,
-            address: customer.address || "",
-            city: customer.city || "",
-            date_of_birth: customer.date_of_birth || "",
-            id_card_number: customer.id_card_number || "",
-            drivers_license_number: customer.drivers_license_number || "",
-            license_expiry_date: customer.license_expiry_date || "",
-            emergency_contact_name: customer.emergency_contact_name || "",
-            emergency_contact_phone: customer.emergency_contact_phone || "",
-            notes: customer.notes || "",
-            is_blacklisted: customer.is_blacklisted,
-          })
+          customer_type: customer.customer_type,
+          full_name: customer.full_name,
+          company_name: customer.company_name || "",
+          email: customer.email || "",
+          phone: customer.phone,
+          address: customer.address || "",
+          city: customer.city || "",
+          date_of_birth: customer.date_of_birth || "",
+          id_card_number: customer.id_card_number || "",
+          drivers_license_number: customer.drivers_license_number || "",
+          license_expiry_date: customer.license_expiry_date || "",
+          emergency_contact_name: customer.emergency_contact_name || "",
+          emergency_contact_phone: customer.emergency_contact_phone || "",
+          notes: customer.notes || "",
+          is_blacklisted: customer.is_blacklisted,
+          apply_tier_discount: customer.apply_tier_discount ?? true, // <--- add this
+        })
         } catch (error) {
           toast.error("Failed to load customer")
           router.push("/dashboard/customers")
