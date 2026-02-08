@@ -92,18 +92,3 @@ export function useCustomerSegmentation() {
   )
 }
 
-export function useContractAnalytics(params?: AnalyticsPeriod) {
-  return useAnalyticsData<ContractAnalytics>(
-    analyticsAPI.getContractStats,
-    params,
-    [params?.period, params?.start_date, params?.end_date]
-  )
-}
-
-export function usePaymentAnalytics(params?: AnalyticsPeriod) {
-  return useAnalyticsData<PaymentAnalytics>(
-    analyticsAPI.getPaymentStats,
-    params,
-    [params?.period, params?.start_date, params?.end_date]
-  )
-}
