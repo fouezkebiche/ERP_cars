@@ -1,45 +1,46 @@
-// lib/api-client.ts - FIXED VERSION
-import axios, { AxiosError } from 'axios'
+// lib/api-client.ts
+"use client"
 
-// IMPORTANT: Base URL should NOT include /api since we add it in each request
+import axios from "axios"
+
+// Create axios instance
 export const apiClient = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000',
+  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000",
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
   timeout: 10000,
 })
 
-// Request interceptor - add auth token
+// --------------------
+// REQUEST INTERCEPTOR
+// --------------------
 apiClient.interceptors.request.use(
   (config) => {
-    // ✅ Use 'accessToken' to match your auth system
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
-    
+    const token =
+      typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+      // cast headers to any to avoid TS issues
+      (config.headers as any).Authorization = `Bearer ${token}`
     }
-    
-    console.log(`🔵 API Request: ${config.method?.toUpperCase()} ${config.url}`, {
-      params: config.params,
-    })
-    
+
+    console.log(
+      `🔵 API Request: ${config.method?.toUpperCase()} ${config.url}`,
+      { params: config.params }
+    )
+
     return config
   },
-  (error) => {
-    console.error('❌ Request interceptor error:', error)
-    return Promise.reject(error)
-  }
+  (error) => Promise.reject(error)
 )
 
-// Response interceptor - handle errors globally
+// --------------------
+// RESPONSE INTERCEPTOR
+// --------------------
 apiClient.interceptors.response.use(
-  (response) => {
-    console.log(`✅ API Response: ${response.config.url}`, response.status)
-    return response
-  },
-  (error: AxiosError) => {
-    // ✅ FIXED: Better error logging and handling
+  (response) => response,
+  (error: any) => {
+    // ✅ let TS infer, no AxiosError import
     const errorDetails = {
       url: error.config?.url,
       method: error.config?.method,
@@ -47,56 +48,38 @@ apiClient.interceptors.response.use(
       data: error.response?.data,
       message: error.message,
     }
-    
-    console.error('❌ API Error:', errorDetails)
-    
+    console.error("❌ API Error:", errorDetails)
+
     if (error.response) {
-      // Server responded with error status
-      const { status, data } = error.response as any
-      
-      if (status === 401) {
-        // Unauthorized - clear tokens and redirect to login
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('accessToken')
-          localStorage.removeItem('refreshToken')
-          localStorage.removeItem('user')
-          window.location.href = '/login'
-        }
+      const { status, data } = error.response
+
+      if (status === 401 && typeof window !== "undefined") {
+        localStorage.removeItem("accessToken")
+        localStorage.removeItem("refreshToken")
+        localStorage.removeItem("user")
+        window.location.href = "/login"
       }
-      
-      // ✅ FIXED: Return properly structured error
-      const errorResponse = {
+
+      return Promise.reject({
         statusCode: status,
-        message: data?.message || data?.error || 'An error occurred',
-        details: data?.details || data?.error || error.message,
+        message: data?.message || data?.error || "An error occurred",
+        details: data?.details || error.message,
         success: false,
-      }
-      
-      return Promise.reject(errorResponse)
+      })
     } else if (error.request) {
-      // Request made but no response received
-      console.error('🔴 No response from server:', error.request)
-      
-      const errorResponse = {
+      return Promise.reject({
         statusCode: 0,
-        message: 'Network error - Could not connect to server',
+        message: "Network error - Could not connect to server",
         details: error.message,
         success: false,
-      }
-      
-      return Promise.reject(errorResponse)
+      })
     } else {
-      // Error in request setup
-      console.error('🔴 Request setup error:', error.message)
-      
-      const errorResponse = {
+      return Promise.reject({
         statusCode: 0,
-        message: 'Request failed',
+        message: "Request failed",
         details: error.message,
         success: false,
-      }
-      
-      return Promise.reject(errorResponse)
+      })
     }
   }
 )

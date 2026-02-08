@@ -12,7 +12,8 @@ api.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("authToken")
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+      // ✅ Fix: cast headers to any to avoid TS error
+      (config.headers as any).Authorization = `Bearer ${token}`
     }
   }
   return config
