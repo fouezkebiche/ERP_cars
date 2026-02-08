@@ -1,5 +1,9 @@
 // server.js (UPDATED)
 const app = require('./src/app');
+
+// 🔥 LOAD ALL MODELS & RELATIONS
+require('./src/models');
+
 const { sequelize, testConnection } = require('./src/config/database');
 const { scheduleVehicleLimitCheck } = require('./src/jobs/vehicleLimitMonitoring.job');
 const { scheduleMaintenanceMonitoring } = require('./src/jobs/vehicleMaintenanceMonitoring.job');
@@ -14,10 +18,8 @@ const startServer = async () => {
     console.log('✅ Database connected');
 
     // 2. Sync database (optional - remove in production)
-    if (process.env.NODE_ENV === 'development') {
-      await sequelize.sync({ alter: false }); // Set to true only when needed
-      console.log('✅ Database synced');
-    }
+    await sequelize.sync({ alter: true });
+    console.log('✅ Database schema created');
 
     // 3. Start cron jobs
     console.log('⏰ Starting scheduled jobs...');
