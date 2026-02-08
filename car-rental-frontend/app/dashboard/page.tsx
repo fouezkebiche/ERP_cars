@@ -184,8 +184,8 @@ export default function DashboardPage() {
           {Object.entries(data).map(([key, value]) => (
             <li key={key} className="capitalize">
               <span className="font-medium">{key.replace(/_/g, ' ').toLowerCase()}:</span>{' '}
-              {typeof value === 'object' 
-                ? Object.entries(value).map(([k, v]) => `${k}: ${v}`).join(', ') || 'N/A'  // FIXED: Flatten objects
+              {typeof value === 'object'
+                ? Object.entries(value ?? {}).map(([k, v]) => `${k}: ${v}`).join(', ') || 'N/A'
                 : String(value) || 'N/A'
               }
             </li>
