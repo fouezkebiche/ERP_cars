@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { LogoutButton } from "@/app/logout/page"
+import { LogoutButton } from "@/components/LogoutButton"
 import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
 
