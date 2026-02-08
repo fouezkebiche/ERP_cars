@@ -63,21 +63,26 @@ export function VehicleMaintenanceTab({ vehicle, onUpdate }: VehicleMaintenanceT
 
   // Fetch maintenance history
   const fetchHistory = async () => {
-    setLoading(true)
-    try {
-      const response = await getMaintenanceHistory(vehicle.id)
-      
-      if (response.success) {
-        setRecords(response.data.maintenance_records)
-        setStats(response.data.stats)
-      }
-    } catch (error: any) {
-      console.error('Failed to fetch maintenance history:', error)
-      toast.error('Failed to load maintenance history')
-    } finally {
-      setLoading(false)
+  setLoading(true)
+  try {
+    const response = await getMaintenanceHistory(vehicle.id)
+    
+    if (response.success) {
+      // Ensure description is always a string
+      const records: MaintenanceRecord[] = response.data.maintenance_records.map((r: any) => ({
+        ...r,
+        description: r.description || "", // <-- fill undefined with empty string
+      }))
+      setRecords(records)
+      setStats(response.data.stats)
     }
+  } catch (error: any) {
+    console.error('Failed to fetch maintenance history:', error)
+    toast.error('Failed to load maintenance history')
+  } finally {
+    setLoading(false)
   }
+}
 
   useEffect(() => {
     fetchHistory()
