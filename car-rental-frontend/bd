@@ -1,0 +1,433 @@
+-- ============================================
+-- COMPANIES & AUTHENTICATION
+-- ============================================
+
+CREATE TABLE companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(50),
+    address TEXT,
+    tax_id VARCHAR(100),
+    logo_url TEXT,
+    subscription_plan ENUM('basic', 'professional', 'enterprise') DEFAULT 'basic',
+    subscription_status ENUM('active', 'inactive', 'trial', 'suspended') DEFAULT 'trial',
+    subscription_start_date TIMESTAMP,
+    subscription_end_date TIMESTAMP,
+    trial_ends_at TIMESTAMP,
+    monthly_recurring_revenue DECIMAL(12, 2) DEFAULT 0,
+    settings JSONB, -- Company-specific settings
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    full_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    phone VARCHAR(50),
+    avatar_url TEXT,
+    role ENUM('owner', 'admin', 'manager', 'staff', 'viewer') DEFAULT 'staff',
+    is_active BOOLEAN DEFAULT TRUE,
+    last_login_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_company_users (company_id),
+    INDEX idx_email (email)
+);
+
+-- ============================================
+-- PERMISSIONS & ROLES (for Question 4)
+-- ============================================
+
+CREATE TABLE permissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) UNIQUE NOT NULL, -- e.g., 'view_vehicles', 'edit_contracts', 'delete_customers'
+    description TEXT,
+    module VARCHAR(50) NOT NULL -- 'vehicles', 'customers', 'contracts', 'payments', etc.
+);
+
+CREATE TABLE role_permissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL,
+    permission_id UUID REFERENCES permissions(id) ON DELETE CASCADE,
+    UNIQUE(company_id, role, permission_id)
+);
+
+CREATE TABLE user_custom_permissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    permission_id UUID REFERENCES permissions(id) ON DELETE CASCADE,
+    granted BOOLEAN DEFAULT TRUE, -- TRUE = grant, FALSE = revoke
+    UNIQUE(user_id, permission_id)
+);
+
+-- ============================================
+-- VEHICLES
+-- ============================================
+
+CREATE TABLE vehicles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    brand VARCHAR(100) NOT NULL,
+    model VARCHAR(100) NOT NULL,
+    year INT NOT NULL,
+    registration_number VARCHAR(50) UNIQUE NOT NULL,
+    vin VARCHAR(17) UNIQUE, -- Vehicle Identification Number
+    color VARCHAR(50),
+    transmission ENUM('manual', 'automatic') DEFAULT 'manual',
+    fuel_type ENUM('petrol', 'diesel', 'electric', 'hybrid') DEFAULT 'petrol',
+    seats INT DEFAULT 5,
+    daily_rate DECIMAL(10, 2) NOT NULL,
+    status ENUM('available', 'rented', 'maintenance', 'retired') DEFAULT 'available',
+    mileage INT DEFAULT 0, -- Current odometer reading
+    purchase_price DECIMAL(12, 2), -- For ROI calculations
+    purchase_date DATE,
+    photos JSONB, -- Array of image URLs
+    features JSONB, -- GPS, AC, Bluetooth, etc.
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_company_vehicles (company_id),
+    INDEX idx_status (status)
+);
+
+-- ============================================
+-- VEHICLE COSTS (for Profitability - Question 2)
+-- ============================================
+
+CREATE TABLE vehicle_costs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    vehicle_id UUID REFERENCES vehicles(id) ON DELETE CASCADE,
+    cost_type ENUM('fuel', 'maintenance', 'insurance', 'registration', 'cleaning', 'repair', 'other') NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    cost_date DATE NOT NULL,
+    description TEXT,
+    receipt_url TEXT, -- Upload receipt/invoice
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_vehicle_costs (vehicle_id, cost_date)
+);
+
+CREATE TABLE vehicle_maintenance (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    vehicle_id UUID REFERENCES vehicles(id) ON DELETE CASCADE,
+    maintenance_type ENUM('oil_change', 'tire_replacement', 'brake_service', 'inspection', 'repair', 'other') NOT NULL,
+    description TEXT,
+    cost DECIMAL(10, 2),
+    scheduled_date DATE,
+    completed_date DATE,
+    next_due_date DATE,
+    mileage_at_service INT,
+    status ENUM('scheduled', 'in_progress', 'completed', 'cancelled') DEFAULT 'scheduled',
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_vehicle_maintenance (vehicle_id, next_due_date)
+);
+
+-- ============================================
+-- CUSTOMERS
+-- ============================================
+
+CREATE TABLE customers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    customer_type ENUM('individual', 'corporate') DEFAULT 'individual',
+    full_name VARCHAR(255) NOT NULL,
+    company_name VARCHAR(255), -- For corporate customers
+    email VARCHAR(255),
+    phone VARCHAR(50) NOT NULL,
+    address TEXT,
+    city VARCHAR(100),
+    date_of_birth DATE,
+    id_card_number VARCHAR(50),
+    drivers_license_number VARCHAR(50) UNIQUE,
+    license_expiry_date DATE,
+    id_card_photo_url TEXT,
+    license_photo_url TEXT,
+    emergency_contact_name VARCHAR(255),
+    emergency_contact_phone VARCHAR(50),
+    notes TEXT,
+    is_blacklisted BOOLEAN DEFAULT FALSE,
+    total_rentals INT DEFAULT 0,
+    lifetime_value DECIMAL(12, 2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_company_customers (company_id),
+    INDEX idx_phone (phone),
+    INDEX idx_license (drivers_license_number)
+);
+
+-- ============================================
+-- CONTRACTS & RENTALS
+-- ============================================
+
+CREATE TABLE contracts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_number VARCHAR(50) UNIQUE NOT NULL, -- e.g., RENT-2025-0001
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    customer_id UUID REFERENCES customers(id) ON DELETE RESTRICT,
+    vehicle_id UUID REFERENCES vehicles(id) ON DELETE RESTRICT,
+    created_by UUID REFERENCES users(id), -- Employee who created the contract
+    
+    -- Rental Period
+    start_date TIMESTAMP NOT NULL,
+    end_date TIMESTAMP NOT NULL,
+    actual_return_date TIMESTAMP, -- Can be different from end_date
+    
+    -- Pricing
+    daily_rate DECIMAL(10, 2) NOT NULL,
+    total_days INT NOT NULL,
+    base_amount DECIMAL(10, 2) NOT NULL,
+    additional_charges DECIMAL(10, 2) DEFAULT 0, -- Insurance, GPS, etc.
+    discount_amount DECIMAL(10, 2) DEFAULT 0,
+    tax_amount DECIMAL(10, 2) DEFAULT 0,
+    total_amount DECIMAL(10, 2) NOT NULL,
+    
+    -- Mileage
+    start_mileage INT,
+    end_mileage INT,
+    mileage_limit INT, -- km allowed
+    mileage_charge_per_km DECIMAL(5, 2), -- Charge for exceeding limit
+    
+    -- Status
+    status ENUM('draft', 'active', 'completed', 'cancelled', 'extended') DEFAULT 'active',
+    
+    -- Extras
+    extras JSONB, -- GPS, child seat, additional driver, insurance, etc.
+    
+    -- Documents
+    contract_pdf_url TEXT,
+    contract_signed_date TIMESTAMP,
+    
+    -- Deposit
+    deposit_amount DECIMAL(10, 2) DEFAULT 0,
+    deposit_returned BOOLEAN DEFAULT FALSE,
+    
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_company_contracts (company_id),
+    INDEX idx_customer_contracts (customer_id),
+    INDEX idx_vehicle_contracts (vehicle_id),
+    INDEX idx_status (status),
+    INDEX idx_dates (start_date, end_date)
+);
+
+-- ============================================
+-- PAYMENTS
+-- ============================================
+
+CREATE TABLE payments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    contract_id UUID REFERENCES contracts(id) ON DELETE CASCADE,
+    customer_id UUID REFERENCES customers(id) ON DELETE RESTRICT,
+    
+    amount DECIMAL(10, 2) NOT NULL,
+    payment_method ENUM('cash', 'card', 'bank_transfer', 'check', 'mobile_payment') NOT NULL,
+    payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reference_number VARCHAR(100), -- Transaction ID, check number, etc.
+    
+    status ENUM('pending', 'completed', 'failed', 'refunded') DEFAULT 'completed',
+    
+    notes TEXT,
+    receipt_url TEXT,
+    
+    processed_by UUID REFERENCES users(id), -- Employee who processed payment
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_contract_payments (contract_id),
+    INDEX idx_payment_date (payment_date)
+);
+
+-- ============================================
+-- EMPLOYEES (HR Module - Question 4)
+-- ============================================
+
+CREATE TABLE employees (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL, -- Link to login account (optional)
+    
+    full_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255),
+    phone VARCHAR(50) NOT NULL,
+    position VARCHAR(100), -- Driver, Manager, Receptionist, etc.
+    department VARCHAR(100),
+    
+    -- Salary
+    salary_type ENUM('hourly', 'monthly', 'commission') DEFAULT 'monthly',
+    salary_amount DECIMAL(10, 2),
+    commission_rate DECIMAL(5, 2), -- For sales commission
+    
+    hire_date DATE,
+    termination_date DATE,
+    
+    status ENUM('active', 'on_leave', 'terminated') DEFAULT 'active',
+    
+    id_card_number VARCHAR(50),
+    address TEXT,
+    emergency_contact_name VARCHAR(255),
+    emergency_contact_phone VARCHAR(50),
+    
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_company_employees (company_id),
+    INDEX idx_status (status)
+);
+
+CREATE TABLE employee_salaries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
+    month DATE NOT NULL, -- First day of the month
+    base_salary DECIMAL(10, 2) NOT NULL,
+    bonuses DECIMAL(10, 2) DEFAULT 0,
+    deductions DECIMAL(10, 2) DEFAULT 0,
+    commission DECIMAL(10, 2) DEFAULT 0,
+    total_paid DECIMAL(10, 2) NOT NULL,
+    payment_date DATE,
+    payment_method ENUM('cash', 'bank_transfer', 'check'),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_employee_salaries (employee_id, month)
+);
+
+CREATE TABLE employee_attendance (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    check_in_time TIME,
+    check_out_time TIME,
+    hours_worked DECIMAL(4, 2),
+    status ENUM('present', 'absent', 'leave', 'sick', 'holiday') DEFAULT 'present',
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_employee_attendance (employee_id, date)
+);
+
+-- ============================================
+-- COMPANY EXPENSES (for Profitability - Question 2)
+-- ============================================
+
+CREATE TABLE expenses (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    expense_type ENUM('rent', 'utilities', 'marketing', 'office_supplies', 'insurance', 'taxes', 'salaries', 'fuel', 'other') NOT NULL,
+    amount DECIMAL(12, 2) NOT NULL,
+    expense_date DATE NOT NULL,
+    description TEXT,
+    category VARCHAR(100),
+    receipt_url TEXT,
+    recorded_by UUID REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_company_expenses (company_id, expense_date)
+);
+
+-- ============================================
+-- ANALYTICS & REPORTS (Pre-calculated for speed)
+-- ============================================
+
+CREATE TABLE daily_revenue_summary (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    date DATE NOT NULL,
+    total_revenue DECIMAL(12, 2) DEFAULT 0,
+    total_costs DECIMAL(12, 2) DEFAULT 0,
+    net_profit DECIMAL(12, 2) DEFAULT 0,
+    active_rentals INT DEFAULT 0,
+    new_contracts INT DEFAULT 0,
+    completed_contracts INT DEFAULT 0,
+    payments_received DECIMAL(12, 2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(company_id, date),
+    INDEX idx_company_date (company_id, date)
+);
+
+CREATE TABLE vehicle_performance_summary (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    vehicle_id UUID REFERENCES vehicles(id) ON DELETE CASCADE,
+    month DATE NOT NULL, -- First day of month
+    total_revenue DECIMAL(10, 2) DEFAULT 0,
+    total_costs DECIMAL(10, 2) DEFAULT 0,
+    net_profit DECIMAL(10, 2) DEFAULT 0,
+    days_rented INT DEFAULT 0,
+    total_rentals INT DEFAULT 0,
+    utilization_rate DECIMAL(5, 2), -- Percentage
+    average_daily_rate DECIMAL(10, 2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(vehicle_id, month),
+    INDEX idx_vehicle_month (vehicle_id, month)
+);
+
+-- ============================================
+-- PLATFORM ADMIN TABLES
+-- ============================================
+
+CREATE TABLE platform_subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    plan_name VARCHAR(50) NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    billing_cycle ENUM('monthly', 'annual') DEFAULT 'monthly',
+    start_date TIMESTAMP NOT NULL,
+    end_date TIMESTAMP NOT NULL,
+    auto_renew BOOLEAN DEFAULT TRUE,
+    status ENUM('active', 'cancelled', 'expired') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_company_subscriptions (company_id)
+);
+
+CREATE TABLE platform_invoices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    invoice_number VARCHAR(50) UNIQUE NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    due_date DATE NOT NULL,
+    paid_date DATE,
+    status ENUM('pending', 'paid', 'overdue', 'cancelled') DEFAULT 'pending',
+    invoice_pdf_url TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_company_invoices (company_id, status)
+);
+
+-- ============================================
+-- ACTIVITY LOGS (Audit Trail)
+-- ============================================
+
+CREATE TABLE activity_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    action VARCHAR(100) NOT NULL, -- 'created_contract', 'updated_vehicle', 'deleted_customer'
+    entity_type VARCHAR(50), -- 'contract', 'vehicle', 'customer'
+    entity_id UUID,
+    old_values JSONB,
+    new_values JSONB,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_company_logs (company_id, created_at),
+    INDEX idx_user_logs (user_id, created_at)
+);
+
+-- ============================================
+-- NOTIFICATIONS
+-- ============================================
+
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL, -- 'maintenance_due', 'payment_overdue', 'contract_expiring'
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    action_url TEXT,
+    is_read BOOLEAN DEFAULT FALSE,
+    read_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_notifications (user_id, is_read, created_at)
+);
