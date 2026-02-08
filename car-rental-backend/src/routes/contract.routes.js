@@ -1,6 +1,8 @@
-// src/routes/contract.routes.js
+// src/routes/contract.routes.js - UNIFIED VERSION
 const express = require('express');
 const router = express.Router();
+
+// Import contract controllers
 const {
   getAllContracts,
   getContractById,
@@ -11,52 +13,138 @@ const {
   extendContract,
   getContractStats,
 } = require('../controllers/contract.controller');
+
+// Import KM & overage controllers
+const {
+  completeContractWithMileage,
+  estimateOverageCharges,
+  getCustomerTierInfoEndpoint,
+} = require('../controllers/contractKm.controller');
+
+// Import payment controller
+const { getContractPayments } = require('../controllers/payment.controller');
+
+// Import middleware
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { requireRole } = require('../middleware/permissions.middleware');
 const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
-const { getContractPayments } = require('../controllers/payment.controller');
 
-// Apply authentication and tenant isolation to ALL routes
+// ============================================
+// APPLY MIDDLEWARE TO ALL ROUTES
+// ============================================
 router.use(authenticateToken);
 router.use(injectCompanyId);
 
 // ============================================
-// CONTRACT ROUTES
+// GLOBAL CONTRACT ROUTES (MUST BE FIRST)
 // ============================================
 
-// GET /api/contracts/stats - Get statistics
-// Must be BEFORE /:id to avoid matching 'stats' as an ID
+/**
+ * GET /api/contracts/stats
+ * Get contract statistics
+ * MUST be before /:id to avoid matching 'stats' as an ID
+ */
 router.get('/stats', getContractStats);
 
-// GET /api/contracts - List all contracts
-// All authenticated users can view contracts
+/**
+ * GET /api/contracts
+ * List all contracts with filters
+ */
 router.get('/', getAllContracts);
 
-// GET /api/contracts/:id - Get single contract
-router.get('/:id', getContractById);
-
-// POST /api/contracts - Create new contract
-// All users can create contracts
+/**
+ * POST /api/contracts
+ * Create new contract
+ */
 router.post('/', createContract);
 
-// PUT /api/contracts/:id - Update contract
-// Only owners, admins, managers, and staff can update
-router.put('/:id', requireRole(['owner', 'admin', 'manager', 'staff']), updateContract);
+// ============================================
+// SPECIFIC CONTRACT ROUTES (/:id ROUTES)
+// Order matters! More specific routes BEFORE generic /:id
+// ============================================
 
-// POST /api/contracts/:id/complete - Complete rental
-// Only owners, admins, managers, and staff can complete
-router.post('/:id/complete', requireRole(['owner', 'admin', 'manager', 'staff']), completeContract);
+/**
+ * GET /api/contracts/:id/mileage-estimate
+ * Estimate overage charges before completing contract
+ * Query params: estimated_end_mileage (integer)
+ */
+router.get('/:id/mileage-estimate', estimateOverageCharges);
 
-// POST /api/contracts/:id/cancel - Cancel contract
-// Only owners, admins, and managers can cancel
-router.post('/:id/cancel', requireRole(['owner', 'admin', 'manager']), cancelContract);
-
-// POST /api/contracts/:id/extend - Extend rental period
-// Only owners, admins, managers, and staff can extend
-router.post('/:id/extend', requireRole(['owner', 'admin', 'manager', 'staff']), extendContract);
-
-
-// GET /api/contracts/:id/payments - Get all payments for a contract
+/**
+ * GET /api/contracts/:id/payments
+ * Get all payments for a contract
+ */
 router.get('/:id/payments', getContractPayments);
+
+/**
+ * GET /api/contracts/:id
+ * Get single contract details
+ */
+router.get('/:id', getContractById);
+
+/**
+ * PUT /api/contracts/:id
+ * Update contract
+ */
+router.put(
+  '/:id',
+  requireRole(['owner', 'admin', 'manager', 'staff']),
+  updateContract
+);
+
+/**
+ * POST /api/contracts/:id/complete-with-mileage
+ * Complete contract with automatic overage calculation (NEW - with tier pricing)
+ * 
+ * Body:
+ *   - end_mileage: Final vehicle mileage (required)
+ *   - actual_return_date: Return date (required)
+ *   - additional_charges: Other charges (optional)
+ *   - notes: Additional notes (optional)
+ * 
+ * Features:
+ *   - Calculates km driven
+ *   - Applies tier-based km bonuses
+ *   - Calculates overage charges with tier discounts
+ *   - Updates contract total
+ *   - Returns vehicle to available
+ *   - Creates overage notification
+ */
+router.post(
+  '/:id/complete-with-mileage',
+  requireRole(['owner', 'admin', 'manager', 'staff']),
+  completeContractWithMileage
+);
+
+/**
+ * POST /api/contracts/:id/complete
+ * Complete contract (LEGACY - basic completion without tier pricing)
+ * Use /complete-with-mileage for new implementations
+ */
+router.post(
+  '/:id/complete',
+  requireRole(['owner', 'admin', 'manager', 'staff']),
+  completeContract
+);
+
+/**
+ * POST /api/contracts/:id/cancel
+ * Cancel contract
+ */
+router.post(
+  '/:id/cancel',
+  requireRole(['owner', 'admin', 'manager']),
+  cancelContract
+);
+
+/**
+ * POST /api/contracts/:id/extend
+ * Extend rental period
+ */
+router.post(
+  '/:id/extend',
+  requireRole(['owner', 'admin', 'manager', 'staff']),
+  extendContract
+);
 
 module.exports = router;

@@ -1,4 +1,4 @@
-// src/routes/vehicle.routes.js
+// src/routes/vehicle.routes.js - FIXED
 const express = require('express');
 const router = express.Router();
 const {
@@ -11,6 +11,11 @@ const {
   addVehicleCost,
   getVehicleCosts,
 } = require('../controllers/vehicle.controller');
+const {
+  completeMaintenanceService,
+  getMaintenanceHistory,
+  getVehiclesDueMaintenance,
+} = require('../controllers/vehicleMaintenance.controller');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { requireRole } = require('../middleware/permissions.middleware');
 const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
@@ -20,42 +25,57 @@ router.use(authenticateToken);
 router.use(injectCompanyId);
 
 // ============================================
+// MAINTENANCE ROUTES (MUST BE BEFORE /:id)
+// ============================================
+
+// GET /api/vehicles/maintenance/due
+router.get('/maintenance/due', getVehiclesDueMaintenance);
+
+// ============================================
 // VEHICLE ROUTES
 // ============================================
 
 // GET /api/vehicles - List all vehicles (with filters)
-// All authenticated users can view vehicles
 router.get('/', getAllVehicles);
 
 // GET /api/vehicles/available - Get available vehicles
-// Must be BEFORE /:id route to avoid matching 'available' as an ID
+// MUST be BEFORE /:id route
 router.get('/available', getAvailableVehicles);
 
 // GET /api/vehicles/:id - Get single vehicle
 router.get('/:id', getVehicleById);
 
 // POST /api/vehicles - Create vehicle
-// Only owners, admins, and managers can create vehicles
 router.post('/', requireRole(['owner', 'admin', 'manager']), createVehicle);
 
 // PUT /api/vehicles/:id - Update vehicle
-// Only owners, admins, and managers can update vehicles
 router.put('/:id', requireRole(['owner', 'admin', 'manager']), updateVehicle);
 
 // DELETE /api/vehicles/:id - Delete vehicle (soft delete)
-// Only owners and admins can delete vehicles
 router.delete('/:id', requireRole(['owner', 'admin']), deleteVehicle);
+
+// ============================================
+// VEHICLE-SPECIFIC MAINTENANCE ROUTES
+// ============================================
+
+// POST /api/vehicles/:id/maintenance/complete
+router.post(
+  '/:id/maintenance/complete',
+  requireRole(['owner', 'admin', 'manager']),
+  completeMaintenanceService
+);
+
+// GET /api/vehicles/:id/maintenance/history
+router.get('/:id/maintenance/history', getMaintenanceHistory);
 
 // ============================================
 // VEHICLE COST ROUTES
 // ============================================
 
 // POST /api/vehicles/:id/costs - Add vehicle cost
-// Only owners, admins, and managers can add costs
 router.post('/:id/costs', requireRole(['owner', 'admin', 'manager']), addVehicleCost);
 
 // GET /api/vehicles/:id/costs - Get cost history
-// All authenticated users can view costs
 router.get('/:id/costs', getVehicleCosts);
 
 module.exports = router;

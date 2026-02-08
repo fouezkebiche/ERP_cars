@@ -83,6 +83,11 @@ const Customer = sequelize.define('Customer', {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0,
   },
+  apply_tier_discount: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+    allowNull: false,
+  },
 }, {
   tableName: 'customers',
   timestamps: true,

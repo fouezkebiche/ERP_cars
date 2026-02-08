@@ -1,3 +1,4 @@
+// src/models/VehicleCost.js - Compatible with your existing index.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 
@@ -41,6 +42,11 @@ const VehicleCost = sequelize.define('VehicleCost', {
       key: 'id',
     },
   },
+  metadata: {
+    type: DataTypes.JSONB,
+    defaultValue: {},
+    comment: 'Additional metadata like service_type, parts_replaced, technician_name, etc.',
+  },
 }, {
   tableName: 'vehicle_costs',
   timestamps: true,
@@ -49,6 +55,9 @@ const VehicleCost = sequelize.define('VehicleCost', {
   indexes: [
     {
       fields: ['vehicle_id', 'incurred_date'],
+    },
+    {
+      fields: ['cost_type'],
     },
   ],
 });

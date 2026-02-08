@@ -4,6 +4,7 @@ const { sendSuccess, sendError } = require('../utils/response.util');
 const { body, validationResult } = require('express-validator');
 const { Op } = require('sequelize');
 const { applyTenantFilter, applyTenantData } = require('../middleware/tenantIsolation.middleware');
+const { getDefaultDailyKmLimit, getDefaultOverageRate } = require('../services/companySettings.service');
 
 // ============================================
 // HELPER: Generate contract number (atomic with uniqueness check)
@@ -222,7 +223,7 @@ const getContractById = async (req, res) => {
 // POST /api/contracts - Create new contract
 // ============================================
 const createContract = [
-  // Validators
+  // Validators (same as before)
   body('customer_id').isUUID().withMessage('Valid customer ID required'),
   body('vehicle_id').isUUID().withMessage('Valid vehicle ID required'),
   body('start_date').isISO8601().withMessage('Valid start date required'),
@@ -231,7 +232,8 @@ const createContract = [
   body('deposit_amount').optional().isFloat({ min: 0 }),
   body('additional_charges').optional().isFloat({ min: 0 }),
   body('discount_amount').optional().isFloat({ min: 0 }),
-  body('mileage_limit').optional().isInt({ min: 0 }),
+  body('mileage_limit').optional().isInt({ min: 0 }), // Legacy - kept for backward compatibility
+  body('daily_km_limit').optional().isInt({ min: 0 }), // NEW - can be specified per contract
   body('extras').optional().isObject(),
   body('notes').optional().trim(),
 
@@ -296,7 +298,7 @@ const createContract = [
         });
       }
 
-      // Check for conflicting contracts
+      // Check for conflicting contracts (same as before)
       const conflictingContract = await Contract.findOne({
         where: {
           vehicle_id,
@@ -322,11 +324,23 @@ const createContract = [
         });
       }
 
-      // Generate contract number (pass transaction)
+      // Generate contract number (same as before)
       const contractNumber = await generateContractNumber(req.companyId, transaction);
 
-      // Calculate totals
+      // Calculate totals (same as before)
       const totals = calculateContractTotals(req.body);
+
+      // ✨ NEW: Get company-specific KM settings
+      const [companyDailyKmLimit, companyOverageRate] = await Promise.all([
+        getDefaultDailyKmLimit(req.companyId),
+        getDefaultOverageRate(req.companyId),
+      ]);
+
+      // Use contract-specific value if provided, else use company default
+      const dailyKmLimit = req.body.daily_km_limit || companyDailyKmLimit;
+      const totalKmAllowed = dailyKmLimit * totals.total_days;
+
+      console.log(`📊 Contract KM Policy: ${dailyKmLimit}km/day (company default: ${companyDailyKmLimit}km) for ${totals.total_days} days = ${totalKmAllowed}km total`);
 
       // Create contract
       const contractData = applyTenantData(req, {
@@ -335,15 +349,18 @@ const createContract = [
         created_by: req.user.id,
         status: 'active',
         start_mileage: vehicle.mileage,
+        daily_km_limit: dailyKmLimit, // ✨ Use company/contract-specific value
+        total_km_allowed: totalKmAllowed,
+        overage_rate_per_km: companyOverageRate, // ✨ Use company default
         ...totals,
       });
 
       const contract = await Contract.create(contractData, { transaction });
 
-      // Update vehicle status
+      // Update vehicle status (same as before)
       await vehicle.update({ status: 'rented' }, { transaction });
 
-      // Update customer stats
+      // Update customer stats (same as before)
       await customer.update(
         {
           total_rentals: customer.total_rentals + 1,
@@ -363,7 +380,7 @@ const createContract = [
         ],
       });
 
-      console.log(`📄 New contract created: ${contractNumber}`);
+      console.log(`📄 New contract created: ${contractNumber} with ${dailyKmLimit}km/day limit`);
 
       sendSuccess(res, {
         statusCode: 201,

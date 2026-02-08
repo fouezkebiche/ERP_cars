@@ -1,4 +1,4 @@
-// src/controllers/vehicle.controller.js
+// src/controllers/vehicle.controller.js - COMPLETE FIXED VERSION
 const { Vehicle, VehicleCost, Contract } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
 const { body, validationResult } = require('express-validator');
@@ -170,39 +170,57 @@ const getVehicleById = async (req, res) => {
   try {
     const { id } = req.params;
 
+    console.log(`🔍 Fetching vehicle with ID: ${id} for company: ${req.companyId}`);
+
+    // First, try to find the vehicle without includes to isolate the issue
     const vehicle = await Vehicle.findOne({
       where: applyTenantFilter(req, { id }),
-      include: [
-        {
-          model: VehicleCost,
-          as: 'costs',
-          limit: 10,
-          order: [['incurred_date', 'DESC']],
-        },
-        {
-          model: Contract,
-          as: 'contracts',
-          where: { status: 'active' },
-          required: false,
-        },
-      ],
     });
 
     if (!vehicle) {
+      console.log(`❌ Vehicle not found: ${id}`);
       return sendError(res, {
         statusCode: 404,
         message: 'Vehicle not found',
+        details: `No vehicle found with ID ${id} for your company`,
       });
     }
 
-    console.log(`🚗 Vehicle fetched: ${vehicle.brand} ${vehicle.model}`);
+    // Now fetch with associations
+    let vehicleWithDetails;
+    try {
+      vehicleWithDetails = await Vehicle.findOne({
+        where: applyTenantFilter(req, { id }),
+        include: [
+          {
+            model: VehicleCost,
+            as: 'costs',
+            limit: 10,
+            order: [['incurred_date', 'DESC']],
+            required: false,
+            separate: true, // Fixes ordering issue with included models
+          },
+        ],
+      });
+    } catch (includeError) {
+      console.error('⚠️ Error fetching with includes, returning basic vehicle:', includeError);
+      // If includes fail, return the basic vehicle data
+      vehicleWithDetails = vehicle;
+    }
+
+    console.log(`✅ Vehicle fetched successfully: ${vehicle.brand} ${vehicle.model} (${vehicle.registration_number})`);
 
     sendSuccess(res, {
       message: 'Vehicle fetched successfully',
-      data: { vehicle },
+      data: { vehicle: vehicleWithDetails },
     });
   } catch (error) {
-    console.error('💥 Get vehicle error:', error);
+    console.error('💥 Get vehicle error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    });
+    
     sendError(res, {
       statusCode: 500,
       message: 'Failed to fetch vehicle',
@@ -230,6 +248,13 @@ const createVehicle = [
   body('purchase_price').optional().isFloat({ min: 0 }),
   body('purchase_date').optional().isISO8601(),
   body('vin').optional().isLength({ min: 17, max: 17 }).withMessage('VIN must be 17 characters'),
+  // Optional maintenance configuration per vehicle
+  body('maintenance_interval_km').optional().isInt({ min: 500 }).withMessage('Maintenance interval must be >= 500km'),
+  body('maintenance_alert_threshold').optional().isInt({ min: 10 }).withMessage('Alert threshold must be >= 10km'),
+  body('last_maintenance_mileage').optional().isInt({ min: 0 }),
+  body('next_maintenance_mileage').optional().isInt({ min: 0 }),
+  body('last_maintenance_date').optional().isISO8601(),
+  body('next_maintenance_date').optional().isISO8601(),
 
   async (req, res) => {
     try {
@@ -292,6 +317,13 @@ const updateVehicle = [
   body('daily_rate').optional().isFloat({ min: 0 }),
   body('status').optional().isIn(['available', 'rented', 'maintenance', 'retired']),
   body('mileage').optional().isInt({ min: 0 }),
+  // Optional maintenance fields can be tuned later
+  body('maintenance_interval_km').optional().isInt({ min: 500 }),
+  body('maintenance_alert_threshold').optional().isInt({ min: 10 }),
+  body('last_maintenance_mileage').optional().isInt({ min: 0 }),
+  body('next_maintenance_mileage').optional().isInt({ min: 0 }),
+  body('last_maintenance_date').optional().isISO8601(),
+  body('next_maintenance_date').optional().isISO8601(),
 
   async (req, res) => {
     try {

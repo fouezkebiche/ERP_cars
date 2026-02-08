@@ -69,22 +69,20 @@ const getProfile = async (req, res) => {
     const { company_id } = req.user; // From authenticated user
     console.log('🏢 Fetching profile for company_id:', company_id);
 
-    const company = await Company.findByPk(company_id, {
-      attributes: { exclude: ['settings'] }, // Hide settings for security; fetch separately if needed
-    });
+    const company = await Company.findByPk(company_id);
 
     if (!company) {
       console.log('🚫 Company not found:', company_id);
       return sendError(res, { statusCode: 404, message: 'Company not found' });
     }
 
-    // Convert to plain object and exclude settings
-    const { settings, ...safeCompany } = company.toJSON();
-    console.log('🏢 Profile fetched for:', safeCompany.name);
+    // Return full company including settings so the settings page can load/save defaultDailyKmLimit etc.
+    const companyJson = company.toJSON();
+    console.log('🏢 Profile fetched for:', companyJson.name);
 
     sendSuccess(res, {
       message: 'Company profile fetched successfully',
-      data: { company: safeCompany },
+      data: { company: companyJson },
     });
   } catch (error) {
     console.error('💥 Get company profile error:', error);

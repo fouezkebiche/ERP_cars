@@ -1,23 +1,53 @@
-// server.js
+// server.js (UPDATED)
 const app = require('./src/app');
-const { sequelize, testConnection } = require('./src/config/database'); // Assuming your DB config is set up as in the provided code
+const { sequelize, testConnection } = require('./src/config/database');
+const { scheduleVehicleLimitCheck } = require('./src/jobs/vehicleLimitMonitoring.job');
+const { scheduleMaintenanceMonitoring } = require('./src/jobs/vehicleMaintenanceMonitoring.job');
+const { scheduleKmLimitMonitoring } = require('./src/jobs/kmLimitMonitoring.job');
 
 const PORT = process.env.PORT || 5000;
 
-// Test DB connection on startup (optional but good for your Sequelize setup)
 const startServer = async () => {
   try {
-    await testConnection(); // From your database.js
+    // 1. Test DB connection
+    await testConnection();
     console.log('✅ Database connected');
+
+    // 2. Sync database (optional - remove in production)
+    if (process.env.NODE_ENV === 'development') {
+      await sequelize.sync({ alter: false }); // Set to true only when needed
+      console.log('✅ Database synced');
+    }
+
+    // 3. Start cron jobs
+    console.log('⏰ Starting scheduled jobs...');
+    scheduleVehicleLimitCheck();        // Daily at 9 AM
+    scheduleMaintenanceMonitoring();    // Every 6 hours + daily at 8 AM
+    scheduleKmLimitMonitoring();        // Every 4 hours
+    console.log('✅ All cron jobs scheduled');
+
+    // 4. Start the server
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🌐 API Base URL: http://localhost:${PORT}/api`);
+    });
+
   } catch (error) {
-    console.error('❌ Database connection failed:', error);
+    console.error('❌ Server startup failed:', error);
     process.exit(1);
   }
-
-  // Start the server
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-  });
 };
+
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('👋 SIGTERM signal received: closing server gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('👋 SIGINT signal received: closing server gracefully');
+  process.exit(0);
+});
 
 startServer();

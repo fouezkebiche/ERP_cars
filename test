@@ -1,0 +1,4079 @@
+// src/controllers/employee.controller.js
+const { Employee, User, Contract, sequelize } = require('../models');
+const { sendSuccess, sendError } = require('../utils/response.util');
+const { body, validationResult } = require('express-validator');
+const { Op } = require('sequelize');
+const { applyTenantFilter, applyTenantData } = require('../middleware/tenantIsolation.middleware');
+const { hashPassword } = require('../utils/bcrypt.util');
+
+// RBAC: Role definitions with permissions
+const ROLES = {
+  owner: {
+    label: 'Owner',
+    description: 'Full system access including billing',
+    permissions: ['*'], // All permissions
+  },
+  admin: {
+    label: 'Administrator',
+    description: 'Nearly full access, manages employees and settings',
+    permissions: [
+      'view_dashboard',
+      'view_analytics',
+      'create_employees',
+      'update_employees',
+      'delete_employees',
+      'view_employees',
+      'create_vehicles',
+      'update_vehicles',
+      'delete_vehicles',
+      'view_vehicles',
+      'create_customers',
+      'update_customers',
+      'delete_customers',
+      'view_customers',
+      'create_contracts',
+      'update_contracts',
+      'cancel_contracts',
+      'view_contracts',
+      'create_payments',
+      'update_payments',
+      'view_payments',
+      'manage_settings',
+    ],
+  },
+  manager: {
+    label: 'Manager',
+    description: 'Operational control, views analytics',
+    permissions: [
+      'view_dashboard',
+      'view_analytics',
+      'view_employees',
+      'create_vehicles',
+      'update_vehicles',
+      'view_vehicles',
+      'create_customers',
+      'update_customers',
+      'view_customers',
+      'create_contracts',
+      'update_contracts',
+      'complete_contracts',
+      'view_contracts',
+      'create_payments',
+      'view_payments',
+    ],
+  },
+  sales_agent: {
+    label: 'Sales Agent',
+    description: 'Creates contracts, manages customers, processes payments',
+    permissions: [
+      'view_dashboard',
+      'create_customers',
+      'update_customers',
+      'view_customers',
+      'create_contracts',
+      'update_contracts',
+      'view_contracts',
+      'create_payments',
+      'view_payments',
+      'view_vehicles', // Read-only for booking
+    ],
+  },
+  fleet_coordinator: {
+    label: 'Fleet Coordinator',
+    description: 'Manages vehicles and maintenance',
+    permissions: [
+      'view_dashboard',
+      'create_vehicles',
+      'update_vehicles',
+      'view_vehicles',
+      'add_vehicle_costs',
+      'view_vehicle_costs',
+      'view_contracts', // Read-only for scheduling
+    ],
+  },
+  accountant: {
+    label: 'Accountant',
+    description: 'Financial operations and analytics',
+    permissions: [
+      'view_dashboard',
+      'view_analytics',
+      'view_payments',
+      'create_payments',
+      'update_payments',
+      'view_contracts', // Read-only
+      'view_customers', // Read-only
+    ],
+  },
+  receptionist: {
+    label: 'Receptionist',
+    description: 'Basic operations: check-in/out, contracts, payments',
+    permissions: [
+      'view_dashboard',
+      'view_customers',
+      'create_customers',
+      'create_contracts',
+      'view_contracts',
+      'create_payments',
+      'view_payments',
+      'view_vehicles', // Read-only
+    ],
+  },
+};
+
+// ============================================
+// HELPER: Check if user has permission
+// ============================================
+const hasPermission = (employee, requiredPermission) => {
+  // Get role permissions
+  const rolePermissions = ROLES[employee.role]?.permissions || [];
+  
+  // Owner has all permissions
+  if (rolePermissions.includes('*')) return true;
+  
+  // Check role permissions
+  if (rolePermissions.includes(requiredPermission)) return true;
+  
+  // Check custom permissions
+  if (employee.custom_permissions?.[requiredPermission] === true) return true;
+  
+  return false;
+};
+
+// ============================================
+// GET /api/employees/roles - Get available roles
+// ============================================
+const getAvailableRoles = async (req, res) => {
+  try {
+    const roles = Object.entries(ROLES).map(([value, config]) => ({
+      value,
+      label: config.label,
+      description: config.description,
+      permissions: config.permissions,
+    }));
+
+    sendSuccess(res, {
+      message: 'Available roles fetched successfully',
+      data: { roles },
+    });
+  } catch (error) {
+    console.error('💥 Get roles error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch roles',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/employees - List all employees
+// ============================================
+const getAllEmployees = async (req, res) => {
+  try {
+    const {
+      status,
+      role,
+      department,
+      search,
+      page = 1,
+      limit = 20,
+      sort_by = 'created_at',
+      sort_order = 'DESC',
+    } = req.query;
+
+    const whereClause = applyTenantFilter(req);
+
+    if (status) whereClause.status = status;
+    if (role) whereClause.role = role;
+    if (department) whereClause.department = department;
+
+    // Search by name, email, phone, position
+    if (search) {
+      whereClause[Op.or] = [
+        { full_name: { [Op.iLike]: `%${search}%` } },
+        { email: { [Op.iLike]: `%${search}%` } },
+        { phone: { [Op.iLike]: `%${search}%` } },
+        { position: { [Op.iLike]: `%${search}%` } },
+      ];
+    }
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const { count, rows: employees } = await Employee.findAndCountAll({
+      where: whereClause,
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['id', 'email', 'is_active', 'last_login_at'],
+        },
+      ],
+      limit: parseInt(limit),
+      offset: offset,
+      order: [[sort_by, sort_order.toUpperCase()]],
+    });
+
+    console.log(`👥 Fetched ${employees.length} employees for company ${req.companyId}`);
+
+    sendSuccess(res, {
+      message: 'Employees fetched successfully',
+      data: { employees },
+      meta: {
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total_pages: Math.ceil(count / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Get employees error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch employees',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// GET /api/employees/:id - Get single employee
+// ============================================
+const getEmployeeById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const employee = await Employee.findOne({
+      where: applyTenantFilter(req, { id }),
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['id', 'email', 'role', 'is_active', 'last_login_at'],
+        },
+        {
+          model: Contract,
+          as: 'created_contracts',
+          attributes: ['id', 'contract_number', 'total_amount', 'status'],
+          limit: 10,
+          order: [['created_at', 'DESC']],
+        },
+      ],
+    });
+
+    if (!employee) {
+      return sendError(res, {
+        statusCode: 404,
+        message: 'Employee not found',
+      });
+    }
+
+    console.log(`👤 Employee fetched: ${employee.full_name}`);
+
+    sendSuccess(res, {
+      message: 'Employee fetched successfully',
+      data: { employee },
+    });
+  } catch (error) {
+    console.error('💥 Get employee error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch employee',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// POST /api/employees - Create employee
+// ============================================
+const createEmployee = [
+  // Validators
+  body('full_name').notEmpty().withMessage('Full name is required').trim(),
+  body('email').isEmail().withMessage('Valid email required').normalizeEmail(),
+  body('phone').notEmpty().withMessage('Phone is required').trim(),
+  body('password')
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters'),
+  body('role')
+    .isIn(Object.keys(ROLES))
+    .withMessage(`Role must be one of: ${Object.keys(ROLES).join(', ')}`),
+  body('department')
+    .optional()
+    .isIn(['management', 'sales', 'fleet', 'finance', 'customer_service', 'operations']),
+  body('position').optional().trim(),
+  body('salary_type')
+    .optional()
+    .isIn(['hourly', 'monthly', 'commission', 'fixed_plus_commission']),
+  body('salary').optional().isFloat({ min: 0 }),
+  body('commission_rate').optional().isFloat({ min: 0, max: 100 }),
+  body('hire_date').isISO8601().withMessage('Valid hire date required'),
+  body('work_schedule').optional().isObject(),
+  body('custom_permissions').optional().isObject(),
+
+  async (req, res) => {
+    const transaction = await sequelize.transaction();
+
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { email, password, role, ...employeeData } = req.body;
+
+      // Check if email already exists
+      const existingUser = await User.findOne({ where: { email } });
+      if (existingUser) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 409,
+          message: 'Email already in use',
+        });
+      }
+
+      // Only owner/admin can create employees
+      if (!['owner', 'admin'].includes(req.user.role)) {
+        await transaction.rollback();
+        return sendError(res, {
+          statusCode: 403,
+          message: 'Only owners and admins can create employees',
+        });
+      }
+
+      // Create User account first
+      const user = await User.create(
+        {
+          company_id: req.companyId,
+          full_name: employeeData.full_name,
+          email,
+          password, // Model hook will hash this
+          role, // User role matches employee role
+          is_active: true,
+        },
+        { transaction }
+      );
+
+      // Create Employee profile
+      const employee = await Employee.create(
+        applyTenantData(req, {
+          ...employeeData,
+          email,
+          role,
+          user_id: user.id,
+          status: 'active',
+          custom_permissions: employeeData.custom_permissions || {},
+          work_schedule: employeeData.work_schedule || {
+            monday: { start: '09:00', end: '17:00' },
+            tuesday: { start: '09:00', end: '17:00' },
+            wednesday: { start: '09:00', end: '17:00' },
+            thursday: { start: '09:00', end: '17:00' },
+            friday: { start: '09:00', end: '17:00' },
+          },
+        }),
+        { transaction }
+      );
+
+      await transaction.commit();
+
+      // Fetch with relations
+      const fullEmployee = await Employee.findByPk(employee.id, {
+        include: [{ model: User, as: 'user', attributes: ['id', 'email', 'role'] }],
+      });
+
+      console.log(`👤 New employee created: ${employee.full_name} (${role})`);
+
+      sendSuccess(res, {
+        statusCode: 201,
+        message: 'Employee created successfully',
+        data: {
+          employee: fullEmployee,
+          login_credentials: {
+            email,
+            temporary_password: '(sent to employee email)', // In production, send via email
+          },
+        },
+      });
+    } catch (error) {
+      await transaction.rollback();
+      console.error('💥 Create employee error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to create employee',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// PUT /api/employees/:id - Update employee
+// ============================================
+const updateEmployee = [
+  body('full_name').optional().notEmpty().trim(),
+  body('phone').optional().notEmpty().trim(),
+  body('position').optional().trim(),
+  body('department').optional().isIn(['management', 'sales', 'fleet', 'finance', 'customer_service', 'operations']),
+  body('salary').optional().isFloat({ min: 0 }),
+  body('commission_rate').optional().isFloat({ min: 0, max: 100 }),
+  body('status').optional().isIn(['active', 'on_leave', 'suspended', 'terminated']),
+  body('custom_permissions').optional().isObject(),
+  body('work_schedule').optional().isObject(),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { id } = req.params;
+
+      const employee = await Employee.findOne({
+        where: applyTenantFilter(req, { id }),
+      });
+
+      if (!employee) {
+        return sendError(res, { statusCode: 404, message: 'Employee not found' });
+      }
+
+      // Only owner/admin can update employees
+      if (!['owner', 'admin'].includes(req.user.role)) {
+        return sendError(res, {
+          statusCode: 403,
+          message: 'Only owners and admins can update employees',
+        });
+      }
+
+      await employee.update(req.body);
+
+      console.log(`🔄 Employee updated: ${employee.full_name}`);
+
+      sendSuccess(res, {
+        message: 'Employee updated successfully',
+        data: { employee },
+      });
+    } catch (error) {
+      console.error('💥 Update employee error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to update employee',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// DELETE /api/employees/:id - Terminate employee
+// ============================================
+const terminateEmployee = async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { id } = req.params;
+
+    const employee = await Employee.findOne({
+      where: applyTenantFilter(req, { id }),
+      include: [{ model: User, as: 'user' }],
+    });
+
+    if (!employee) {
+      await transaction.rollback();
+      return sendError(res, { statusCode: 404, message: 'Employee not found' });
+    }
+
+    // Only owner can terminate
+    if (req.user.role !== 'owner') {
+      await transaction.rollback();
+      return sendError(res, {
+        statusCode: 403,
+        message: 'Only owners can terminate employees',
+      });
+    }
+
+    // Cannot terminate owner
+    if (employee.role === 'owner') {
+      await transaction.rollback();
+      return sendError(res, {
+        statusCode: 403,
+        message: 'Cannot terminate owner account',
+      });
+    }
+
+    // Soft delete: Update status
+    await employee.update(
+      {
+        status: 'terminated',
+        termination_date: new Date(),
+      },
+      { transaction }
+    );
+
+    // Deactivate user account
+    if (employee.user) {
+      await employee.user.update({ is_active: false }, { transaction });
+    }
+
+    await transaction.commit();
+
+    console.log(`🗑️ Employee terminated: ${employee.full_name}`);
+
+    sendSuccess(res, {
+      message: 'Employee terminated successfully',
+      data: { employee },
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error('💥 Terminate employee error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to terminate employee',
+      details: error.message,
+    });
+  }
+};
+
+// ============================================
+// POST /api/employees/:id/reset-password
+// ============================================
+const resetEmployeePassword = [
+  body('new_password')
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters'),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, {
+          statusCode: 422,
+          message: 'Validation failed',
+          details: errors.array(),
+        });
+      }
+
+      const { id } = req.params;
+      const { new_password } = req.body;
+
+      const employee = await Employee.findOne({
+        where: applyTenantFilter(req, { id }),
+        include: [{ model: User, as: 'user' }],
+      });
+
+      if (!employee || !employee.user) {
+        return sendError(res, { statusCode: 404, message: 'Employee not found' });
+      }
+
+      // Only owner/admin can reset passwords
+      if (!['owner', 'admin'].includes(req.user.role)) {
+        return sendError(res, {
+          statusCode: 403,
+          message: 'Only owners and admins can reset passwords',
+        });
+      }
+
+      // Hash and update password
+      const passwordHash = await hashPassword(new_password);
+      await employee.user.update({ password_hash: passwordHash });
+
+      console.log(`🔑 Password reset for employee: ${employee.full_name}`);
+
+      sendSuccess(res, {
+        message: 'Password reset successfully',
+      });
+    } catch (error) {
+      console.error('💥 Reset password error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to reset password',
+        details: error.message,
+      });
+    }
+  },
+];
+
+// ============================================
+// GET /api/employees/stats - Get statistics
+// ============================================
+const getEmployeeStats = async (req, res) => {
+  try {
+    const companyFilter = { company_id: req.companyId };
+
+    const totalEmployees = await Employee.count({ where: companyFilter });
+
+    // By status
+    const active = await Employee.count({ where: { ...companyFilter, status: 'active' } });
+    const on_leave = await Employee.count({ where: { ...companyFilter, status: 'on_leave' } });
+    const terminated = await Employee.count({ where: { ...companyFilter, status: 'terminated' } });
+
+    // By role
+    const byRole = await Employee.findAll({
+      where: companyFilter,
+      attributes: ['role', [sequelize.fn('COUNT', sequelize.col('id')), 'count']],
+      group: ['role'],
+      raw: true,
+    });
+
+    // Top performers
+    const topPerformers = await Employee.findAll({
+      where: { ...companyFilter, status: 'active' },
+      order: [['total_revenue_generated', 'DESC']],
+      limit: 5,
+      attributes: ['id', 'full_name', 'role', 'total_contracts_created', 'total_revenue_generated'],
+    });
+
+    const stats = {
+      total_employees: totalEmployees,
+      by_status: { active, on_leave, terminated },
+      by_role: byRole.reduce((acc, item) => {
+        acc[item.role] = parseInt(item.count);
+        return acc;
+      }, {}),
+      top_performers: topPerformers,
+    };
+
+    sendSuccess(res, {
+      message: 'Employee statistics fetched successfully',
+      data: { stats },
+    });
+  } catch (error) {
+    console.error('💥 Get employee stats error:', error);
+    sendError(res, {
+      statusCode: 500,
+      message: 'Failed to fetch employee statistics',
+      details: error.message,
+    });
+  }
+};
+
+module.exports = {
+  getAllEmployees,
+  getEmployeeById,
+  createEmployee,
+  updateEmployee,
+  terminateEmployee,
+  resetEmployeePassword,
+  getEmployeeStats,
+  getAvailableRoles,
+  hasPermission, // Export for use in permission middleware
+  ROLES, // Export for reference
+};
+
+
+// src/routes/employee.routes.js
+const express = require('express');
+const router = express.Router();
+const {
+  getAllEmployees,
+  getEmployeeById,
+  createEmployee,
+  updateEmployee,
+  terminateEmployee,
+  resetEmployeePassword,
+  getEmployeeStats,
+  getAvailableRoles,
+} = require('../controllers/employee.controller');
+const { authenticateToken } = require('../middleware/auth.middleware');
+const { requireRole } = require('../middleware/permissions.middleware');
+const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
+
+// Apply authentication and tenant isolation to ALL routes
+router.use(authenticateToken);
+router.use(injectCompanyId);
+
+// ============================================
+// EMPLOYEE ROUTES
+// ============================================
+
+/**
+ * GET /api/employees/roles
+ * Get available roles with their permissions
+ * Access: All authenticated users
+ */
+router.get('/roles', getAvailableRoles);
+
+/**
+ * GET /api/employees/stats
+ * Get employee statistics
+ * Access: Owner, Admin, Manager
+ */
+router.get('/stats', requireRole(['owner', 'admin', 'manager']), getEmployeeStats);
+
+/**
+ * GET /api/employees
+ * List all employees with filters
+ * Query params:
+ *   - status: 'active' | 'on_leave' | 'suspended' | 'terminated'
+ *   - role: Employee role
+ *   - department: Department name
+ *   - search: Search by name, email, phone, position
+ *   - page: Page number (default: 1)
+ *   - limit: Items per page (default: 20)
+ *   - sort_by: Sort field (default: created_at)
+ *   - sort_order: 'ASC' | 'DESC' (default: DESC)
+ * 
+ * Access: Owner, Admin, Manager
+ */
+router.get('/', requireRole(['owner', 'admin', 'manager']), getAllEmployees);
+
+/**
+ * GET /api/employees/:id
+ * Get single employee with full details
+ * Access: Owner, Admin, Manager
+ */
+router.get('/:id', requireRole(['owner', 'admin', 'manager']), getEmployeeById);
+
+/**
+ * POST /api/employees
+ * Create new employee (also creates user account)
+ * Required fields:
+ *   - full_name: string
+ *   - email: string (unique)
+ *   - phone: string
+ *   - password: string (min 8 chars)
+ *   - role: Role enum
+ *   - hire_date: ISO date
+ * Optional fields:
+ *   - department: Department enum
+ *   - position: string
+ *   - salary_type: Salary type enum
+ *   - salary: number
+ *   - commission_rate: number (0-100)
+ *   - work_schedule: object
+ *   - custom_permissions: object
+ *   - address, emergency_contact_name, emergency_contact_phone, notes
+ * 
+ * Access: Owner, Admin
+ */
+router.post('/', requireRole(['owner', 'admin']), createEmployee);
+
+/**
+ * PUT /api/employees/:id
+ * Update employee details
+ * All fields are optional
+ * Access: Owner, Admin
+ */
+router.put('/:id', requireRole(['owner', 'admin']), updateEmployee);
+
+/**
+ * DELETE /api/employees/:id
+ * Terminate employee (soft delete - sets status to 'terminated')
+ * Also deactivates the associated user account
+ * Note: Cannot terminate owner accounts
+ * Access: Owner only
+ */
+router.delete('/:id', requireRole(['owner']), terminateEmployee);
+
+/**
+ * POST /api/employees/:id/reset-password
+ * Reset employee's password
+ * Required fields:
+ *   - new_password: string (min 8 chars)
+ * 
+ * Access: Owner, Admin
+ */
+router.post('/:id/reset-password', requireRole(['owner', 'admin']), resetEmployeePassword);
+
+module.exports = router;
+
+
+// src/middleware/rbac.middleware.js
+const { Employee } = require('../models');
+const { sendError } = require('../utils/response.util');
+const { ROLES, hasPermission } = require('../controllers/employee.controller');
+
+/**
+ * RBAC Middleware - Permission-based access control
+ * This is MORE granular than role-based control
+ * Usage: requirePermission('create_vehicles')
+ */
+
+// Define all possible permissions
+const PERMISSIONS = {
+  // Dashboard
+  VIEW_DASHBOARD: 'view_dashboard',
+  VIEW_ANALYTICS: 'view_analytics',
+  
+  // Employees
+  CREATE_EMPLOYEES: 'create_employees',
+  UPDATE_EMPLOYEES: 'update_employees',
+  DELETE_EMPLOYEES: 'delete_employees',
+  VIEW_EMPLOYEES: 'view_employees',
+  
+  // Vehicles
+  CREATE_VEHICLES: 'create_vehicles',
+  UPDATE_VEHICLES: 'update_vehicles',
+  DELETE_VEHICLES: 'delete_vehicles',
+  VIEW_VEHICLES: 'view_vehicles',
+  ADD_VEHICLE_COSTS: 'add_vehicle_costs',
+  VIEW_VEHICLE_COSTS: 'view_vehicle_costs',
+  
+  // Customers
+  CREATE_CUSTOMERS: 'create_customers',
+  UPDATE_CUSTOMERS: 'update_customers',
+  DELETE_CUSTOMERS: 'delete_customers',
+  VIEW_CUSTOMERS: 'view_customers',
+  
+  // Contracts
+  CREATE_CONTRACTS: 'create_contracts',
+  UPDATE_CONTRACTS: 'update_contracts',
+  COMPLETE_CONTRACTS: 'complete_contracts',
+  CANCEL_CONTRACTS: 'cancel_contracts',
+  VIEW_CONTRACTS: 'view_contracts',
+  
+  // Payments
+  CREATE_PAYMENTS: 'create_payments',
+  UPDATE_PAYMENTS: 'update_payments',
+  VIEW_PAYMENTS: 'view_payments',
+  
+  // Settings
+  MANAGE_SETTINGS: 'manage_settings',
+  MANAGE_BILLING: 'manage_billing',
+};
+
+/**
+ * Middleware factory: Check if user has required permission
+ * @param {string} requiredPermission - Permission to check
+ * @returns {Function} Express middleware
+ */
+const requirePermission = (requiredPermission) => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        return sendError(res, {
+          statusCode: 401,
+          message: 'Authentication required',
+          code: 'UNAUTHENTICATED',
+        });
+      }
+
+      // Owner always has full access
+      if (req.user.role === 'owner') {
+        return next();
+      }
+
+      // Fetch employee profile (with caching in production)
+      const employee = await Employee.findOne({
+        where: {
+          user_id: req.user.id,
+          company_id: req.companyId,
+          status: 'active',
+        },
+      });
+
+      if (!employee) {
+        return sendError(res, {
+          statusCode: 403,
+          message: 'Employee profile not found or inactive',
+          code: 'FORBIDDEN',
+        });
+      }
+
+      // Check permission
+      if (!hasPermission(employee, requiredPermission)) {
+        console.warn(`🚫 Permission denied: ${req.user.email} tried ${requiredPermission}`);
+        return sendError(res, {
+          statusCode: 403,
+          message: `Insufficient permissions. Required: ${requiredPermission}`,
+          code: 'FORBIDDEN',
+        });
+      }
+
+      // Attach employee to request for downstream use
+      req.employee = employee;
+      next();
+    } catch (error) {
+      console.error('💥 Permission check error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to verify permissions',
+        details: error.message,
+      });
+    }
+  };
+};
+
+/**
+ * Middleware: Check if user has ANY of the given permissions
+ * @param {string[]} permissions - Array of permissions
+ * @returns {Function} Express middleware
+ */
+const requireAnyPermission = (permissions) => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        return sendError(res, {
+          statusCode: 401,
+          message: 'Authentication required',
+          code: 'UNAUTHENTICATED',
+        });
+      }
+
+      if (req.user.role === 'owner') {
+        return next();
+      }
+
+      const employee = await Employee.findOne({
+        where: {
+          user_id: req.user.id,
+          company_id: req.companyId,
+          status: 'active',
+        },
+      });
+
+      if (!employee) {
+        return sendError(res, {
+          statusCode: 403,
+          message: 'Employee profile not found or inactive',
+          code: 'FORBIDDEN',
+        });
+      }
+
+      // Check if user has ANY of the required permissions
+      const hasAnyPermission = permissions.some(perm => hasPermission(employee, perm));
+
+      if (!hasAnyPermission) {
+        return sendError(res, {
+          statusCode: 403,
+          message: `Insufficient permissions. Required one of: ${permissions.join(', ')}`,
+          code: 'FORBIDDEN',
+        });
+      }
+
+      req.employee = employee;
+      next();
+    } catch (error) {
+      console.error('💥 Permission check error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to verify permissions',
+        details: error.message,
+      });
+    }
+  };
+};
+
+/**
+ * Middleware: Inject employee permissions into request
+ * Useful for UI to show/hide features based on permissions
+ */
+const injectPermissions = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return next();
+    }
+
+    // Owner has all permissions
+    if (req.user.role === 'owner') {
+      req.permissions = Object.values(PERMISSIONS);
+      return next();
+    }
+
+    const employee = await Employee.findOne({
+      where: {
+        user_id: req.user.id,
+        company_id: req.companyId,
+        status: 'active',
+      },
+    });
+
+    if (employee) {
+      // Get all permissions for this employee
+      const rolePermissions = ROLES[employee.role]?.permissions || [];
+      const customPermissions = Object.keys(employee.custom_permissions || {}).filter(
+        key => employee.custom_permissions[key] === true
+      );
+
+      req.permissions = [...new Set([...rolePermissions, ...customPermissions])];
+      req.employee = employee;
+    }
+
+    next();
+  } catch (error) {
+    console.error('💥 Inject permissions error:', error);
+    next(); // Don't block request on error
+  }
+};
+
+module.exports = {
+  requirePermission,
+  requireAnyPermission,
+  injectPermissions,
+  PERMISSIONS, // Export for use in routes
+  ROLES, // Re-export for convenience
+};
+
+
+// src/app.js (UPDATED)
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+require('dotenv').config();
+
+// Import routes
+const authRoutes = require('./routes/auth.routes');
+const companyRoutes = require('./routes/company.routes');
+const protectedCompanyRoutes = require('./routes/companyProfile.routes');
+const vehicleRoutes = require('./routes/vehicle.routes');
+const customerRoutes = require('./routes/customer.routes');
+const contractRoutes = require('./routes/contract.routes');
+const paymentRoutes = require('./routes/payment.routes');
+const analyticsRoutes = require('./routes/analytics.routes');
+const employeeRoutes = require('./routes/employee.routes'); // 🆕 NEW
+
+const app = express();
+
+// 1. Security headers (Helmet)
+app.use(helmet());
+
+// 2. CORS (Cross-Origin Resource Sharing)
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+app.use(cors({
+  origin: FRONTEND_URL,
+  optionsSuccessStatus: 200,
+}));
+
+// 3. Logging (Morgan)
+const NODE_ENV = process.env.NODE_ENV || 'development';
+app.use(morgan(NODE_ENV === 'development' ? 'dev' : 'combined'));
+
+// 4. Body parsing
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// ============================================
+// HEALTH CHECK ROUTES
+// ============================================
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    message: 'Car Rental API Server',
+    version: '1.0.0',
+  });
+});
+
+app.get('/api/ping', (req, res) => {
+  res.json({ pong: true, timestamp: new Date().toISOString() });
+});
+
+// ============================================
+// API ROUTES
+// ============================================
+app.use('/api/auth', authRoutes);
+app.use('/api/companies', companyRoutes);
+app.use('/api/company', protectedCompanyRoutes);
+app.use('/api/vehicles', vehicleRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/contracts', contractRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/employees', employeeRoutes); // 🆕 NEW
+
+// ============================================
+// ERROR HANDLERS
+// ============================================
+
+// 404 Handler
+app.use((req, res, next) => {
+  res.status(404).json({ 
+    success: false,
+    error: 'Not Found', 
+    path: req.originalUrl,
+    message: 'The requested resource does not exist',
+  });
+});
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error('❌ Server Error:', err);
+  const isDev = NODE_ENV === 'development';
+  
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal Server Error',
+    ...(isDev && { stack: err.stack }),
+  });
+});
+
+module.exports = app;
+
+
+// src/models/index.js (UPDATED WITH EMPLOYEE RELATIONSHIPS)
+const { sequelize } = require('../config/database');
+
+// Import all models
+const Company = require('./Company');
+const User = require('./User');
+const Vehicle = require('./Vehicle');
+const Customer = require('./Customer');
+const Contract = require('./Contract');
+const Payment = require('./Payment');
+const VehicleCost = require('./VehicleCost');
+const Employee = require('./Employee');
+
+// ============================================
+// COMPANY RELATIONSHIPS
+// ============================================
+Company.hasMany(User, { foreignKey: 'company_id', as: 'users' });
+User.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+Company.hasMany(Vehicle, { foreignKey: 'company_id', as: 'vehicles' });
+Vehicle.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+Company.hasMany(Customer, { foreignKey: 'company_id', as: 'customers' });
+Customer.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+Company.hasMany(Contract, { foreignKey: 'company_id', as: 'contracts' });
+Contract.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+Company.hasMany(Employee, { foreignKey: 'company_id', as: 'employees' });
+Employee.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+Company.hasMany(Payment, { foreignKey: 'company_id', as: 'payments' });
+Payment.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// ============================================
+// CONTRACT RELATIONSHIPS
+// ============================================
+Customer.hasMany(Contract, { foreignKey: 'customer_id', as: 'contracts' });
+Contract.belongsTo(Customer, { foreignKey: 'customer_id', as: 'customer' });
+
+Vehicle.hasMany(Contract, { foreignKey: 'vehicle_id', as: 'contracts' });
+Contract.belongsTo(Vehicle, { foreignKey: 'vehicle_id', as: 'vehicle' });
+
+User.hasMany(Contract, { foreignKey: 'created_by', as: 'created_contracts' });
+Contract.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+
+// ============================================
+// PAYMENT RELATIONSHIPS
+// ============================================
+Contract.hasMany(Payment, { foreignKey: 'contract_id', as: 'payments' });
+Payment.belongsTo(Contract, { foreignKey: 'contract_id', as: 'contract' });
+
+Customer.hasMany(Payment, { foreignKey: 'customer_id', as: 'payments' });
+Payment.belongsTo(Customer, { foreignKey: 'customer_id', as: 'customer' });
+
+User.hasMany(Payment, { foreignKey: 'processed_by', as: 'processed_payments' });
+Payment.belongsTo(User, { foreignKey: 'processed_by', as: 'processor' });
+
+// ============================================
+// VEHICLE COST RELATIONSHIPS
+// ============================================
+Vehicle.hasMany(VehicleCost, { foreignKey: 'vehicle_id', as: 'costs' });
+VehicleCost.belongsTo(Vehicle, { foreignKey: 'vehicle_id', as: 'vehicle' });
+
+User.hasMany(VehicleCost, { foreignKey: 'created_by', as: 'vehicle_costs' });
+VehicleCost.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+
+// ============================================
+// EMPLOYEE RELATIONSHIPS (ENHANCED)
+// ============================================
+// Each Employee has one User account
+User.hasOne(Employee, { foreignKey: 'user_id', as: 'employee_profile' });
+Employee.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+// Employees can create contracts (track performance)
+Employee.hasMany(Contract, { 
+  foreignKey: 'created_by', 
+  sourceKey: 'user_id',
+  as: 'created_contracts' 
+});
+// Note: Contract already has belongsTo User via 'created_by'
+// This creates a reverse relationship for Employee performance tracking
+
+// Employees can process payments (track performance)
+Employee.hasMany(Payment, { 
+  foreignKey: 'processed_by',
+  sourceKey: 'user_id', 
+  as: 'processed_payments' 
+});
+
+// ============================================
+// EXPORT ALL MODELS
+// ============================================
+module.exports = {
+  sequelize,
+  Company,
+  User,
+  Vehicle,
+  Customer,
+  Contract,
+  Payment,
+  VehicleCost,
+  Employee,
+};
+
+
+// src/controllers/auth.controller.js
+const { User, Company } = require('../models');
+const { sendSuccess, sendError } = require('../utils/response.util');
+const { hashPassword, comparePassword } = require('../utils/bcrypt.util');
+const { generateTokens, verifyRefreshToken } = require('../utils/jwt.util');
+const { body, validationResult } = require('express-validator'); // For input validation
+
+// In-memory blacklist for refresh tokens (dev only; use Redis in prod)
+const tokenBlacklist = new Set();
+
+// POST /api/auth/register - Create new user
+const register = [
+  // Validators
+  body('full_name').notEmpty().withMessage('Full name is required'),
+  body('email').isEmail().withMessage('Valid email required').normalizeEmail(),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 chars'),
+  body('company_id').isUUID().withMessage('Valid company ID required'),
+  body('role').optional().isIn(['owner', 'admin', 'manager', 'staff', 'viewer']).withMessage('Invalid role'),
+
+  async (req, res) => {
+    try {
+      // Check validation
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, { statusCode: 422, message: 'Validation failed', details: errors.array() });
+      }
+
+      const { full_name, email, password, company_id, role = 'staff' } = req.body;
+
+      // Check if company exists
+      const company = await Company.findByPk(company_id);
+      if (!company) {
+        return sendError(res, { statusCode: 404, message: 'Company not found' });
+      }
+
+      // Check if user already exists
+      const existingUser = await User.findOne({ where: { email } });
+      if (existingUser) {
+        return sendError(res, { statusCode: 409, message: 'Email already registered' });
+      }
+
+      // Hash password and create user
+      const passwordHash = await hashPassword(password);
+      const user = await User.create({
+        full_name,
+        email,
+        password_hash: passwordHash, // Bypasses model hook for explicit hashing
+        company_id,
+        role,
+        is_active: true,
+      });
+      console.log('👤 New user registered for company:', company_id, 'as', role);
+
+      // Don't return password in response
+      const { password_hash, ...userData } = user.toJSON();
+
+      sendSuccess(res, {
+        statusCode: 201,
+        message: 'User registered successfully',
+        data: { user: userData },
+      });
+    } catch (error) {
+      sendError(res, { statusCode: 500, message: 'Registration failed', details: error.message });
+    }
+  },
+];
+
+// POST /api/auth/login - Login & get tokens
+const login = [
+  // Validators (same)
+  body('email').isEmail().withMessage('Valid email required').normalizeEmail(),
+  body('password').notEmpty().withMessage('Password required'),
+
+  async (req, res) => {
+    try {
+      console.log('🔑 Login attempt for email:', req.body.email); // Log 1: Incoming request
+
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        console.log('❌ Login validation errors:', errors.array()); // Log validation fails
+        return sendError(res, { statusCode: 422, message: 'Validation failed', details: errors.array() });
+      }
+
+      const { email, password } = req.body;
+
+      // Find user
+      const user = await User.findOne({ where: { email } });
+      console.log('🔍 User found?', !!user); // Log 2: User exists?
+      if (!user || !user.is_active) {
+        console.log('🚫 Invalid credentials for:', email);
+        return sendError(res, { statusCode: 401, message: 'Invalid credentials' });
+      }
+
+      // Compare password
+      const isMatch = await comparePassword(password, user.password_hash);
+      console.log('🔒 Password match?', isMatch); // Log 3: Password correct?
+      if (!isMatch) {
+        console.log('🚫 Password mismatch for:', email);
+        return sendError(res, { statusCode: 401, message: 'Invalid credentials' });
+      }
+
+      // Generate tokens
+      const tokens = generateTokens(user);
+
+      // Update last login
+      await user.update({ last_login_at: new Date() });
+
+      const { password_hash, ...userData } = user.toJSON();
+
+      console.log('✅ Login success for:', email); // Log 4: All good
+      sendSuccess(res, {
+        message: 'Login successful',
+        data: { user: userData, ...tokens },
+      });
+    } catch (error) {
+      console.error('💥 Login error:', error); // Log 5: Any crash
+      sendError(res, { statusCode: 500, message: 'Login failed', details: error.message });
+    }
+  },
+];
+
+// GET /api/auth/me - Get current user (protected)
+const getMe = async (req, res) => {
+  try {
+    // req.user from middleware, but fetch fresh from DB for full details
+    const user = await User.findByPk(req.user.id, {
+      attributes: { exclude: ['password_hash'] }, // Hide sensitive fields
+    });
+
+    if (!user) {
+      return sendError(res, { statusCode: 404, message: 'User not found' });
+    }
+
+    sendSuccess(res, { message: 'User profile fetched', data: { user: user.toJSON() } });
+  } catch (error) {
+    sendError(res, { statusCode: 500, message: 'Failed to fetch profile', details: error.message });
+  }
+};
+
+// POST /api/auth/logout - Blacklist refresh token
+const logout = async (req, res) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const refreshToken = req.body.refresh_token || (authHeader && authHeader.split(' ')[1]); // Accept in body or header
+
+    if (!refreshToken) {
+      return sendError(res, { statusCode: 400, message: 'Refresh token required' });
+    }
+
+    // Blacklist it
+    tokenBlacklist.add(refreshToken);
+
+    sendSuccess(res, { message: 'Logged out successfully' });
+  } catch (error) {
+    sendError(res, { statusCode: 500, message: 'Logout failed', details: error.message });
+  }
+};
+
+// POST /api/auth/refresh - Get new access token
+const refresh = [
+  body('refresh_token').notEmpty().withMessage('Refresh token required'),
+
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, { statusCode: 422, message: 'Validation failed', details: errors.array() });
+      }
+
+      const { refresh_token } = req.body;
+
+      // Check blacklist
+      if (tokenBlacklist.has(refresh_token)) {
+        return sendError(res, { statusCode: 401, message: 'Token has been revoked' });
+      }
+
+      // Verify refresh token
+      const decoded = verifyRefreshToken(refresh_token);
+      const user = await User.findByPk(decoded.id);
+
+      if (!user || !user.is_active) {
+        return sendError(res, { statusCode: 401, message: 'User inactive or not found' });
+      }
+
+      // Generate new access token (keep same refresh)
+      const { accessToken } = generateTokens(user);
+
+      sendSuccess(res, {
+        message: 'Token refreshed',
+        data: { accessToken },
+      });
+    } catch (error) {
+      sendError(res, { statusCode: 401, message: error.message || 'Invalid refresh token' });
+    }
+  },
+];
+
+module.exports = {
+  register,
+  login,
+  getMe,
+  logout,
+  refresh,
+};
+
+
+// src/middleware/auth.middleware.js
+const { verifyAccessToken } = require('../utils/jwt.util');
+const { sendError } = require('../utils/response.util');
+
+/**
+ * Middleware to authenticate JWT access token
+ * Expects: Authorization header as 'Bearer <token>'
+ * Sets: req.user = { id, email, role, company_id }
+ * Throws: 401 error if invalid/missing
+ */
+const authenticateToken = (req, res, next) => {
+  try {
+    // Extract token from Authorization header
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+    if (!token) {
+      return sendError(res, {
+        statusCode: 401,
+        message: 'Access token required',
+        code: 'NO_TOKEN',
+      });
+    }
+
+    // Verify token
+    const decoded = verifyAccessToken(token);
+    req.user = decoded; // Attach to req for downstream use
+    next();
+  } catch (error) {
+    return sendError(res, {
+      statusCode: 401,
+      message: error.message || 'Invalid token',
+      code: 'INVALID_TOKEN',
+    });
+  }
+};
+
+/**
+ * Optional: Middleware for optional auth (e.g., public routes with user info if logged in)
+ */
+const authenticateTokenOptional = (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (token) {
+      const decoded = verifyAccessToken(token);
+      req.user = decoded;
+    }
+    // If no token, req.user remains undefined
+    next();
+  } catch (error) {
+    // Silently ignore invalid tokens; treat as unauthenticated
+    next();
+  }
+};
+
+module.exports = {
+  authenticateToken,
+  authenticateTokenOptional,
+};
+
+
+// app/dashboard/hr/page.tsx
+"use client"
+
+import { useState, useEffect, useCallback } from "react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { DataTable } from "@/components/dashboard/data-table"
+import { Plus, Edit2, Search, Key, UserX, Info, Loader2 } from "lucide-react"
+import { useEmployees, useEmployeeStatsAndRoles, useEmployeeMutations } from "@/hooks/useEmployees"
+import { employeeAPI, type CreateEmployeeData, type UpdateEmployeeData, type Employee } from "@/lib/employees"
+import toast from "react-hot-toast"
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
+
+export default function HRPage() {
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [showResetPasswordModal, setShowResetPasswordModal] = useState(false)
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState("")
+  const [roleFilter, setRoleFilter] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+
+  const { employees, loading, updateParams } = useEmployees({
+    search: debouncedSearch || undefined,
+    status: statusFilter || undefined,
+    role: roleFilter || undefined,
+    page: 1,
+    limit: 20,
+  })
+
+  const { stats, roles, loading: statsAndRolesLoading } = useEmployeeStatsAndRoles()
+  const { terminate, resetPassword: apiResetPassword } = useEmployeeMutations()
+
+  // Debounce search to avoid excessive API calls
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Make filters reactive
+  useEffect(() => {
+    updateParams({
+      search: debouncedSearch || undefined,
+      status: statusFilter || undefined,
+      role: roleFilter || undefined,
+      page: 1, // Reset to page 1 on filter change
+    })
+  }, [debouncedSearch, statusFilter, roleFilter, updateParams])
+
+  const handleAddEmployee = useCallback(() => {
+    setShowAddModal(true)
+  }, [])
+
+  const handleEditEmployee = useCallback((employee: Employee) => {
+    setSelectedEmployee(employee)
+    setShowEditModal(true)
+  }, [])
+
+  const handleResetPassword = useCallback((employee: Employee) => {
+    setSelectedEmployee(employee)
+    setShowResetPasswordModal(true)
+  }, [])
+
+  const handleTerminateEmployee = useCallback(async (employee: Employee) => {
+    if (!confirm(`Are you sure you want to terminate ${employee.full_name}? This will deactivate their account.`)) {
+      return
+    }
+
+    try {
+      await terminate(employee.id)
+      toast.success('Employee terminated successfully')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to terminate employee')
+    }
+  }, [terminate])
+
+  const getStatusBadge = (status: string) => {
+    const styles = {
+      active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100',
+      on_leave: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100',
+      suspended: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100',
+      terminated: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100',
+    }
+    return (
+      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${styles[status as keyof typeof styles] || 'bg-gray-100 text-gray-800'}`}>
+        {status.replace('_', ' ').toUpperCase()}
+      </span>
+    )
+  }
+
+  const getRoleLabel = useCallback((role: string) => {
+    const roleObj = roles?.find(r => r.value === role)
+    return roleObj?.label || role
+  }, [roles])
+
+  if (loading || statsAndRolesLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading employees...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <ProtectedRoute requiredRoles={['owner', 'admin', 'manager']}>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">HR & Employees</h1>
+            <p className="text-muted-foreground">Manage your team and employee information</p>
+          </div>
+          <Button onClick={handleAddEmployee} className="bg-primary hover:bg-primary/90">
+            <Plus className="w-4 h-4 mr-2" />
+            Add Employee
+          </Button>
+        </div>
+
+        {/* Employee Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="p-4 rounded-lg border border-border bg-card">
+            <p className="text-sm text-muted-foreground mb-1">Total Employees</p>
+            <p className="text-2xl font-bold">{stats?.total_employees || 0}</p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card">
+            <p className="text-sm text-muted-foreground mb-1">Active</p>
+            <p className="text-2xl font-bold text-green-600">{stats?.by_status?.active || 0}</p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card">
+            <p className="text-sm text-muted-foreground mb-1">On Leave</p>
+            <p className="text-2xl font-bold text-yellow-600">{stats?.by_status?.on_leave || 0}</p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card">
+            <p className="text-sm text-muted-foreground mb-1">Terminated</p>
+            <p className="text-2xl font-bold text-red-600">{stats?.by_status?.terminated || 0}</p>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+          <div className="flex-1 relative w-full sm:w-auto">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+            <Input
+              placeholder="Search by name, email, phone..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Statuses</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="on_leave">On Leave</SelectItem>
+                <SelectItem value="suspended">Suspended</SelectItem>
+                <SelectItem value="terminated">Terminated</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={roleFilter} onValueChange={setRoleFilter}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="All Roles" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Roles</SelectItem>
+                {roles?.map((role) => (
+                  <SelectItem key={role.value} value={role.value}>
+                    {role.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Employee List */}
+        <div className="rounded-lg border border-border overflow-hidden">
+          <DataTable
+            columns={[
+              { 
+                key: "full_name", 
+                label: "Name", 
+                sortable: true,
+                render: (_: any, row: Employee) => (
+                  <div>
+                    <p className="font-medium">{row.full_name}</p>
+                    <p className="text-xs text-muted-foreground">{row.position || 'N/A'}</p>
+                  </div>
+                )
+              },
+              { 
+                key: "role", 
+                label: "Role", 
+                sortable: true,
+                render: (role: string) => getRoleLabel(role)
+              },
+              { 
+                key: "email", 
+                label: "Email",
+                render: (_: any, row: Employee) => (
+                  <div>
+                    <p className="text-sm">{row.email}</p>
+                    <p className="text-xs text-muted-foreground">{row.phone}</p>
+                  </div>
+                )
+              },
+              {
+                key: "department",
+                label: "Department",
+                render: (dept: string | undefined) => dept ? dept.replace('_', ' ').toUpperCase() : 'N/A'
+              },
+              {
+                key: "status",
+                label: "Status",
+                render: (status: string) => getStatusBadge(status),
+              },
+              {
+                key: "id",
+                label: "Actions",
+                render: (_: any, row: Employee) => (
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => handleEditEmployee(row)}
+                      className="p-1 hover:bg-muted rounded"
+                      title="Edit"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => handleResetPassword(row)}
+                      className="p-1 hover:bg-muted rounded"
+                      title="Reset Password"
+                    >
+                      <Key className="w-4 h-4" />
+                    </button>
+                    {row.role !== 'owner' && row.status !== 'terminated' && (
+                      <button 
+                        onClick={() => handleTerminateEmployee(row)}
+                        className="p-1 hover:bg-muted rounded"
+                        title="Terminate"
+                      >
+                        <UserX className="w-4 h-4 text-destructive" />
+                      </button>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+            data={employees}
+          />
+        </div>
+
+        {/* Add Employee Modal */}
+        {showAddModal && (
+          <AddEmployeeModal
+            roles={roles || []}
+            onClose={() => setShowAddModal(false)}
+            onSuccess={() => {
+              setShowAddModal(false)
+            }}
+          />
+        )}
+
+        {/* Edit Employee Modal */}
+        {showEditModal && selectedEmployee && (
+          <EditEmployeeModal
+            employee={selectedEmployee}
+            roles={roles || []}
+            onClose={() => {
+              setShowEditModal(false)
+              setSelectedEmployee(null)
+            }}
+            onSuccess={() => {
+              setShowEditModal(false)
+              setSelectedEmployee(null)
+            }}
+          />
+        )}
+
+        {/* Reset Password Modal */}
+        {showResetPasswordModal && selectedEmployee && (
+          <ResetPasswordModal
+            employee={selectedEmployee}
+            onClose={() => {
+              setShowResetPasswordModal(false)
+              setSelectedEmployee(null)
+            }}
+            onSuccess={() => {
+              setShowResetPasswordModal(false)
+              setSelectedEmployee(null)
+            }}
+          />
+        )}
+      </div>
+    </ProtectedRoute>
+  )
+}
+
+// Add Employee Modal Component
+function AddEmployeeModal({ roles, onClose, onSuccess }: { roles: any[], onClose: () => void, onSuccess: () => void }) {
+  const [formData, setFormData] = useState<CreateEmployeeData>({
+    full_name: '',
+    email: '',
+    phone: '',
+    password: '',
+    role: '',
+    department: '',
+    position: '',
+    salary_type: 'monthly',
+    salary: 0,
+    commission_rate: 0,
+    hire_date: new Date().toISOString().split('T')[0],
+  })
+  const [loading, setLoading] = useState(false)
+  const [showRoleInfo, setShowRoleInfo] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!formData.full_name || !formData.email || !formData.phone || !formData.password || !formData.role || !formData.hire_date) {
+      toast.error('Please fill in all required fields')
+      return
+    }
+
+    try {
+      setLoading(true)
+      await employeeAPI.createEmployee(formData)
+      toast.success('Employee created successfully')
+      onSuccess()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create employee')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const selectedRole = roles.find((r: any) => r.value === formData.role)
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-card rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <h2 className="text-xl font-bold mb-4">Add New Employee</h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Full Name *</label>
+              <Input
+                value={formData.full_name}
+                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                placeholder="Enter full name"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Email *</label>
+              <Input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                placeholder="email@company.com"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Phone *</label>
+              <Input
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                placeholder="+213 XX XXX XXXX"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Password *</label>
+              <Input
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="Min 8 characters"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                Role *
+                <button
+                  type="button"
+                  onClick={() => setShowRoleInfo(!showRoleInfo)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Info className="w-4 h-4" />
+                </button>
+              </label>
+              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Select role</SelectItem>
+                  {roles.map((role: any) => (
+                    <SelectItem key={role.value} value={role.value}>
+                      {role.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedRole && (
+                <p className="text-xs text-muted-foreground mt-1">{selectedRole.description}</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Department</label>
+              <Select value={formData.department} onValueChange={(value) => setFormData({ ...formData, department: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Select department</SelectItem>
+                  <SelectItem value="management">Management</SelectItem>
+                  <SelectItem value="sales">Sales</SelectItem>
+                  <SelectItem value="fleet">Fleet</SelectItem>
+                  <SelectItem value="finance">Finance</SelectItem>
+                  <SelectItem value="customer_service">Customer Service</SelectItem>
+                  <SelectItem value="operations">Operations</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">Position</label>
+              <Input
+                value={formData.position}
+                onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                placeholder="e.g., Senior Sales Manager"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Hire Date *</label>
+              <Input
+                type="date"
+                value={formData.hire_date}
+                onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
+              />
+            </div>
+          </div>
+
+          {showRoleInfo && selectedRole && (
+            <div className="p-4 bg-muted rounded-md">
+              <p className="font-semibold mb-2">Permissions for {selectedRole.label}:</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {selectedRole.permissions.slice(0, 10).map((perm: string) => (
+                  <div key={perm} className="flex items-center gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-accent"></div>
+                    <span>{perm.replace(/_/g, ' ')}</span>
+                  </div>
+                ))}
+                {selectedRole.permissions.length > 10 && (
+                  <span className="text-muted-foreground">
+                    +{selectedRole.permissions.length - 10} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-4">
+            <Button type="button" onClick={onClose} variant="outline" className="flex-1">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading} className="flex-1 bg-primary hover:bg-primary/90">
+              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creating...</> : 'Add Employee'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// Edit Employee Modal Component
+function EditEmployeeModal({ employee, roles, onClose, onSuccess }: { employee: Employee, roles: any[], onClose: () => void, onSuccess: () => void }) {
+  const [formData, setFormData] = useState<UpdateEmployeeData>({
+    full_name: employee.full_name,
+    phone: employee.phone,
+    position: employee.position || '',
+    department: employee.department || '',
+    status: employee.status,
+  })
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    try {
+      setLoading(true)
+      await employeeAPI.updateEmployee(employee.id, formData)
+      toast.success('Employee updated successfully')
+      onSuccess()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update employee')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-card rounded-lg p-6 w-full max-w-md">
+        <h2 className="text-xl font-bold mb-4">Edit Employee</h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Full Name</label>
+            <Input
+              value={formData.full_name}
+              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Phone</label>
+            <Input
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Position</label>
+            <Input
+              value={formData.position}
+              onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Department</label>
+            <Select value={formData.department} onValueChange={(value) => setFormData({ ...formData, department: value })}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select department" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Select department</SelectItem>
+                <SelectItem value="management">Management</SelectItem>
+                <SelectItem value="sales">Sales</SelectItem>
+                <SelectItem value="fleet">Fleet</SelectItem>
+                <SelectItem value="finance">Finance</SelectItem>
+                <SelectItem value="customer_service">Customer Service</SelectItem>
+                <SelectItem value="operations">Operations</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Status</label>
+            <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="on_leave">On Leave</SelectItem>
+                <SelectItem value="suspended">Suspended</SelectItem>
+                {/* Exclude terminated from edit to prevent re-activation via UI */}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex gap-2 pt-4">
+            <Button type="button" onClick={onClose} variant="outline" className="flex-1">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading} className="flex-1">
+              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</> : 'Save Changes'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// Reset Password Modal Component
+function ResetPasswordModal({ employee, onClose, onSuccess }: { employee: Employee, onClose: () => void, onSuccess: () => void }) {
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match')
+      return
+    }
+
+    if (newPassword.length < 8) {
+      toast.error('Password must be at least 8 characters')
+      return
+    }
+
+    try {
+      setLoading(true)
+      await apiResetPassword(employee.id, newPassword)
+      toast.success('Password reset successfully')
+      onSuccess()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to reset password')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-card rounded-lg p-6 w-full max-w-md">
+        <h2 className="text-xl font-bold mb-4">Reset Password</h2>
+        <p className="text-sm text-muted-foreground mb-4">
+          Reset password for: <strong>{employee.full_name}</strong>
+        </p>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">New Password</label>
+            <Input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Min 8 characters"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Confirm Password</label>
+            <Input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Re-enter password"
+            />
+          </div>
+          <div className="flex gap-2 pt-4">
+            <Button type="button" onClick={onClose} variant="outline" className="flex-1">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading} className="flex-1">
+              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Resetting...</> : 'Reset Password'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+
+"use client"
+
+import * as React from "react"
+import * as SelectPrimitive from "@radix-ui/react-select"
+import { Check, ChevronDown, ChevronUp } from "lucide-react"
+
+import { cn } from "@/lib/utils"
+
+const Select = SelectPrimitive.Root
+
+const SelectGroup = SelectPrimitive.Group
+
+const SelectValue = SelectPrimitive.Value
+
+const SelectTrigger = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Trigger
+    ref={ref}
+    className={cn(
+      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+      className
+    )}
+    {...props}
+  >
+    {children}
+    <SelectPrimitive.Icon asChild>
+      <ChevronDown className="h-4 w-4 opacity-50" />
+    </SelectPrimitive.Icon>
+  </SelectPrimitive.Trigger>
+))
+SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
+
+const SelectContent = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
+>(({ className, children, position = "popper", ...props }, ref) => (
+  <SelectPrimitive.Portal>
+    <SelectPrimitive.Content
+      ref={ref}
+      className={cn(
+        "relative z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-80",
+        position === "popper" &&
+          "data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1",
+        className
+      )}
+      position={position}
+      {...props}
+    >
+      <SelectPrimitive.ScrollUpButton className="flex cursor-default items-center justify-center py-1">
+        <ChevronUp className="h-4 w-4" />
+      </SelectPrimitive.ScrollUpButton>
+      <SelectPrimitive.Viewport className="p-1">
+        {children}
+      </SelectPrimitive.Viewport>
+      <SelectPrimitive.ScrollDownButton className="flex cursor-default items-center justify-center py-1">
+        <ChevronDown className="h-4 w-4" />
+      </SelectPrimitive.ScrollDownButton>
+    </SelectPrimitive.Content>
+  </SelectPrimitive.Portal>
+))
+SelectContent.displayName = SelectPrimitive.Content.displayName
+
+const SelectItem = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <SelectPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </SelectPrimitive.ItemIndicator>
+    </span>
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+  </SelectPrimitive.Item>
+))
+SelectItem.displayName = SelectPrimitive.Item.displayName
+
+export {
+  Select,
+  SelectGroup,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+}
+
+
+
+// hooks/useEmployees.ts
+"use client"
+
+import { useState, useCallback } from 'react'
+import useSWR, { useSWRConfig } from 'swr'
+import { employeeAPI, type Employee, type Role, type EmployeeStats, type CreateEmployeeData, type UpdateEmployeeData } from '@/lib/employees'
+import toast from 'react-hot-toast'
+
+// Default fetcher for SWR (uses employeeAPI under the hood)
+const fetcher = (url: string) => fetch(url).then((res) => res.json())
+
+// Hook for listing employees with pagination/search
+export function useEmployees(params: {
+  status?: string
+  role?: string
+  department?: string
+  search?: string
+  page?: number
+  limit?: number
+  sort_by?: string
+  sort_order?: 'ASC' | 'DESC'
+} = {}) {
+  const [currentParams, setCurrentParams] = useState(params)
+  const { data, error, isLoading, mutate: mutateList } = useSWR(
+    `/api/employees?${new URLSearchParams(currentParams as any).toString()}`,
+    fetcher,
+    { revalidateOnFocus: false }
+  )
+
+  const refetch = useCallback(() => mutateList(), [mutateList])
+
+  const updateParams = useCallback((newParams: Partial<typeof params>) => {
+    setCurrentParams(prev => ({ ...prev, ...newParams, page: 1 })) // Reset to page 1 on filter change
+  }, [])
+
+  return {
+    employees: data?.employees || [],
+    meta: data?.meta || { pagination: { total: 0, page: 1, limit: 20, total_pages: 1 } },
+    loading: isLoading,
+    error,
+    refetch,
+    updateParams,
+    totalPages: data?.meta?.pagination?.total_pages || 1,
+    totalCount: data?.meta?.pagination?.total || 0,
+  }
+}
+
+// Hook for single employee details
+export function useEmployee(id: string | null) {
+  const { data, error, isLoading, mutate } = useSWR(id ? `/api/employees/${id}` : null, fetcher)
+
+  return {
+    employee: data?.employee as Employee | undefined,
+    loading: isLoading,
+    error,
+    refetch: mutate,
+  }
+}
+
+// Hook for creating/updating employees (mutations)
+export function useEmployeeMutations() {
+  const { mutate } = useSWRConfig()
+
+  const create = useCallback(async (data: CreateEmployeeData) => {
+    try {
+      const result = await employeeAPI.createEmployee(data)
+      toast.success('Employee created successfully!')
+      // Optimistically update list
+      await mutate('/api/employees')
+      return result
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create employee')
+      throw error
+    }
+  }, [mutate])
+
+  const update = useCallback(async (id: string, data: UpdateEmployeeData) => {
+    try {
+      const result = await employeeAPI.updateEmployee(id, data)
+      toast.success('Employee updated successfully!')
+      // Invalidate and refetch list/details
+      await mutate(`/api/employees`)
+      await mutate(`/api/employees/${id}`)
+      return result
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update employee')
+      throw error
+    }
+  }, [mutate])
+
+  const terminate = useCallback(async (id: string) => {
+    try {
+      const result = await employeeAPI.terminateEmployee(id)
+      toast.success('Employee terminated successfully!')
+      await mutate('/api/employees')
+      return result
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to terminate employee')
+      throw error
+    }
+  }, [mutate])
+
+  const resetPassword = useCallback(async (id: string, newPassword: string) => {
+    try {
+      await employeeAPI.resetPassword(id, newPassword)
+      toast.success('Password reset successfully!')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to reset password')
+      throw error
+    }
+  }, [])
+
+  return { create, update, terminate, resetPassword }
+}
+
+// Hook for stats and roles (read-only)
+export function useEmployeeStatsAndRoles() {
+  const { data: statsData, error: statsError, isLoading: statsLoading } = useSWR('/api/employees/stats', fetcher)
+  const { data: rolesData, error: rolesError, isLoading: rolesLoading } = useSWR('/api/employees/roles', fetcher)
+
+  return {
+    stats: statsData?.stats as EmployeeStats | undefined,
+    roles: rolesData?.roles as Role[] | undefined,
+    loading: statsLoading || rolesLoading,
+    error: statsError || rolesError,
+  }
+}
+
+
+// context/AuthContext.tsx (Updated)
+"use client"
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { useRouter } from 'next/navigation'
+import toast from 'react-hot-toast'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+interface User {
+  id: string
+  email: string
+  full_name: string
+  role: 'owner' | 'admin' | 'manager' | 'sales_agent' | 'fleet_coordinator' | 'accountant' | 'receptionist'
+  company_id: string
+  is_active: boolean
+  last_login_at?: string
+}
+interface AuthContextType {
+  user: User | null
+  loading: boolean
+  login: (email: string, password: string) => Promise<void>
+  logout: () => void
+  register: (data: RegisterData) => Promise<void>
+  refreshToken: () => Promise<void>
+  hasPermission: (permission: string) => boolean
+  hasAnyPermission: (permissions: string[]) => boolean
+  hasRole: (roles: string[]) => boolean
+}
+interface RegisterData {
+  full_name: string
+  email: string
+  password: string
+  company_id: string
+  role?: string
+}
+const AuthContext = createContext<AuthContextType | undefined>(undefined)
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+  const router = useRouter()
+  // Role-based permissions mapping
+  const rolePermissions: Record<string, string[]> = {
+    owner: ['*'], // All permissions
+    admin: [
+      'view_dashboard',
+      'view_analytics',
+      'create_employees',
+      'update_employees',
+      'delete_employees',
+      'view_employees',
+      'create_vehicles',
+      'update_vehicles',
+      'delete_vehicles',
+      'view_vehicles',
+      'create_customers',
+      'update_customers',
+      'delete_customers',
+      'view_customers',
+      'create_contracts',
+      'update_contracts',
+      'cancel_contracts',
+      'view_contracts',
+      'create_payments',
+      'update_payments',
+      'view_payments',
+      'manage_settings',
+    ],
+    manager: [
+      'view_dashboard',
+      'view_analytics',
+      'view_employees',
+      'create_vehicles',
+      'update_vehicles',
+      'view_vehicles',
+      'create_customers',
+      'update_customers',
+      'view_customers',
+      'create_contracts',
+      'update_contracts',
+      'complete_contracts',
+      'view_contracts',
+      'create_payments',
+      'view_payments',
+    ],
+    sales_agent: [
+      'view_dashboard',
+      'create_customers',
+      'update_customers',
+      'view_customers',
+      'create_contracts',
+      'update_contracts',
+      'view_contracts',
+      'create_payments',
+      'view_payments',
+      'view_vehicles',
+    ],
+    fleet_coordinator: [
+      'view_dashboard',
+      'create_vehicles',
+      'update_vehicles',
+      'view_vehicles',
+      'add_vehicle_costs',
+      'view_vehicle_costs',
+      'view_contracts',
+    ],
+    accountant: [
+      'view_dashboard',
+      'view_analytics',
+      'view_payments',
+      'create_payments',
+      'update_payments',
+      'view_contracts',
+      'view_customers',
+    ],
+    receptionist: [
+      'view_dashboard',
+      'view_customers',
+      'create_customers',
+      'create_contracts',
+      'view_contracts',
+      'create_payments',
+      'view_payments',
+      'view_vehicles',
+    ],
+  }
+  // Persist user to localStorage for persistence across sessions/navigations
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('user', JSON.stringify(user))
+    } else {
+      localStorage.removeItem('user')
+    }
+  }, [user])
+
+  useEffect(() => {
+    initializeAuth()
+  }, [])
+
+  const initializeAuth = async () => {
+    // First, try localStorage user (faster, no API call)
+    const storedUser = localStorage.getItem('user')
+    const token = localStorage.getItem('accessToken')
+    if (storedUser && token) {
+      try {
+        setUser(JSON.parse(storedUser))
+        console.log('🔄 Restored user from localStorage')
+      } catch (e) {
+        console.warn('Invalid stored user, clearing')
+        localStorage.removeItem('user')
+      }
+    }
+
+    // Then verify with API if token exists
+    if (token) {
+      await checkAuth()
+    }
+
+    setLoading(false)
+  }
+
+  const checkAuth = async () => {
+    try {
+      const token = localStorage.getItem('accessToken')
+      if (!token) return
+
+      const response = await fetch(`${API_URL}/api/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        const fetchedUser = data.data.user
+        setUser(fetchedUser)
+        // Update localStorage with fresh user
+        localStorage.setItem('user', JSON.stringify(fetchedUser))
+        console.log('✅ Auth verified with /me')
+      } else if (response.status === 401) {
+        // Token invalid/expired
+        console.warn('401: Invalid token, clearing...')
+        clearAuth()
+      } else {
+        // 403 or other: Keep tokens, but log warning (profile issue, not auth failure)
+        console.warn(`checkAuth non-401 error: ${response.status} - Keeping session for manual retry`)
+        // Don't clear—let user stay logged in, they can re-login if needed
+      }
+    } catch (error) {
+      console.error('checkAuth network error:', error)
+      // Only clear on network/auth errors if no stored user
+      if (!localStorage.getItem('user')) {
+        clearAuth()
+      }
+    }
+  }
+
+  const clearAuth = () => {
+    localStorage.removeItem('accessToken')
+    localStorage.removeItem('refreshToken')
+    localStorage.removeItem('user')
+    setUser(null)
+  }
+
+  const login = async (email: string, password: string) => {
+    try {
+      setLoading(true) // Prevent race conditions
+      const response = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Login failed')
+      }
+      // Save tokens
+      localStorage.setItem('accessToken', data.data.accessToken)
+      localStorage.setItem('refreshToken', data.data.refreshToken)
+      // Set user state and localStorage
+      const newUser = data.data.user
+      setUser(newUser)
+      localStorage.setItem('user', JSON.stringify(newUser))
+      console.log('✅ Login: User set and persisted')
+      toast.success(`Welcome back, ${newUser.full_name}!`)
+      // Verify immediately to sync
+      await checkAuth()
+      router.push('/dashboard')
+    } catch (error: any) {
+      setLoading(false)
+      toast.error(error.message || 'Login failed')
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const logout = async () => {
+    try {
+      setLoading(true)
+      const refreshToken = localStorage.getItem('refreshToken')
+      if (refreshToken) {
+        await fetch(`${API_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        })
+      }
+    } catch (error) {
+      console.error('Logout error:', error)
+    } finally {
+      clearAuth()
+      router.push('/login')
+      toast.success('Logged out successfully')
+      setLoading(false)
+    }
+  }
+
+  const register = async (data: RegisterData) => {
+    try {
+      setLoading(true)
+      const response = await fetch(`${API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        throw new Error(result.error || 'Registration failed')
+      }
+      toast.success('Registration successful! Please log in.')
+      router.push('/login')
+    } catch (error: any) {
+      setLoading(false)
+      toast.error(error.message || 'Registration failed')
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const refreshToken = async () => {
+    try {
+      setLoading(true)
+      const refreshTokenValue = localStorage.getItem('refreshToken')
+      if (!refreshTokenValue) {
+        throw new Error('No refresh token')
+      }
+      const response = await fetch(`${API_URL}/api/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: refreshTokenValue }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error('Token refresh failed')
+      }
+      localStorage.setItem('accessToken', data.data.accessToken)
+      // Re-verify user after refresh
+      await checkAuth()
+    } catch (error) {
+      console.error('Token refresh error:', error)
+      clearAuth()
+      throw error
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const hasPermission = (permission: string): boolean => {
+    if (!user) return false
+   
+    const permissions = rolePermissions[user.role] || []
+   
+    // Owner has all permissions
+    if (permissions.includes('*')) return true
+   
+    return permissions.includes(permission)
+  }
+
+  const hasAnyPermission = (permissions: string[]): boolean => {
+    if (!user) return false
+    return permissions.some(perm => hasPermission(perm))
+  }
+
+  const hasRole = (roles: string[]): boolean => {
+    if (!user) return false
+    return roles.includes(user.role)
+  }
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        logout,
+        register,
+        refreshToken,
+        hasPermission,
+        hasAnyPermission,
+        hasRole,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  )
+}
+export function useAuth() {
+  const context = useContext(AuthContext)
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider')
+  }
+  return context
+}
+
+
+
+
+
+// src/middleware/permissions.middleware.js
+const { sendError } = require('../utils/response.util');
+
+/**
+ * Middleware factory: Check if user has required role(s)
+ * Usage: permissionsMiddleware('admin') or permissionsMiddleware(['admin', 'owner'])
+ * Assumes: req.user from auth.middleware.js
+ * Throws: 403 if unauthorized
+ */
+const requireRole = (allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return sendError(res, {
+        statusCode: 401,
+        message: 'Authentication required',
+        code: 'UNAUTHENTICATED',
+      });
+    }
+
+    const userRole = req.user.role;
+    const rolesArray = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+
+    if (!rolesArray.includes(userRole)) {
+      return sendError(res, {
+        statusCode: 403,
+        message: `Insufficient permissions. Required: ${rolesArray.join(', ')}`,
+        code: 'FORBIDDEN',
+      });
+    }
+
+    // Optional: Attach allowed roles to req for logging/auditing
+    req.allowedRoles = rolesArray;
+    next();
+  };
+};
+
+/**
+ * Higher-order: Combine auth + permissions (e.g., requireRole('owner'))
+ * Usage: requireAuthAndRole('owner')
+ */
+const requireAuthAndRole = (allowedRoles) => {
+  const auth = require('../middleware/auth.middleware').authenticateToken;
+  const perm = requireRole(allowedRoles);
+  return [auth, perm];
+};
+
+module.exports = {
+  requireRole,
+  requireAuthAndRole,
+};
+
+
+
+
+// src/middleware/permissions.middleware.js
+const { sendError } = require('../utils/response.util');
+
+/**
+ * Middleware factory: Check if user has required role(s)
+ * Usage: permissionsMiddleware('admin') or permissionsMiddleware(['admin', 'owner'])
+ * Assumes: req.user from auth.middleware.js
+ * Throws: 403 if unauthorized
+ */
+const requireRole = (allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return sendError(res, {
+        statusCode: 401,
+        message: 'Authentication required',
+        code: 'UNAUTHENTICATED',
+      });
+    }
+
+    const userRole = req.user.role;
+    const rolesArray = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+
+    if (!rolesArray.includes(userRole)) {
+      return sendError(res, {
+        statusCode: 403,
+        message: `Insufficient permissions. Required: ${rolesArray.join(', ')}`,
+        code: 'FORBIDDEN',
+      });
+    }
+
+    // Optional: Attach allowed roles to req for logging/auditing
+    req.allowedRoles = rolesArray;
+    next();
+  };
+};
+
+/**
+ * Higher-order: Combine auth + permissions (e.g., requireRole('owner'))
+ * Usage: requireAuthAndRole('owner')
+ */
+const requireAuthAndRole = (allowedRoles) => {
+  const auth = require('../middleware/auth.middleware').authenticateToken;
+  const perm = requireRole(allowedRoles);
+  return [auth, perm];
+};
+
+module.exports = {
+  requireRole,
+  requireAuthAndRole,
+};
+
+
+// components/auth/ProtectedRoute.tsx
+"use client"
+
+import { useAuth } from '@/context/AuthContext'
+import { useRouter } from 'next/navigation'
+import { useEffect } from 'react'
+
+interface ProtectedRouteProps {
+  children: React.ReactNode
+  requiredPermissions?: string[]
+  requiredRoles?: string[]
+  requireAll?: boolean // If true, requires ALL permissions/roles; if false, requires ANY
+}
+
+export function ProtectedRoute({
+  children,
+  requiredPermissions = [],
+  requiredRoles = [],
+  requireAll = false,
+}: ProtectedRouteProps) {
+  const { user, loading, hasPermission, hasRole } = useAuth()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push('/login')
+    }
+  }, [user, loading, router])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Authenticating...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return null
+  }
+
+  // Check role requirements
+  if (requiredRoles.length > 0) {
+    const hasRequiredRole = hasRole(requiredRoles)
+    if (!hasRequiredRole) {
+      return (
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center max-w-md">
+            <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
+            <p className="text-muted-foreground mb-4">
+              You don't have the required role to access this page.
+            </p>
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        </div>
+      )
+    }
+  }
+
+  // Check permission requirements
+  if (requiredPermissions.length > 0) {
+    const hasRequiredPermissions = requireAll
+      ? requiredPermissions.every(perm => hasPermission(perm))
+      : requiredPermissions.some(perm => hasPermission(perm))
+
+    if (!hasRequiredPermissions) {
+      return (
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center max-w-md">
+            <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
+            <p className="text-muted-foreground mb-4">
+              You don't have the required permissions to access this page.
+            </p>
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        </div>
+      )
+    }
+  }
+
+  return <>{children}</>
+}
+
+// components/auth/PermissionGate.tsx
+// Show/hide UI elements based on permissions
+export function PermissionGate({
+  children,
+  permissions = [],
+  roles = [],
+  requireAll = false,
+  fallback = null,
+}: {
+  children: React.ReactNode
+  permissions?: string[]
+  roles?: string[]
+  requireAll?: boolean
+  fallback?: React.ReactNode
+}) {
+  const { user, hasPermission, hasRole } = useAuth()
+
+  if (!user) return fallback
+
+  // Check roles first
+  if (roles.length > 0) {
+    const hasRequiredRole = hasRole(roles)
+    if (!hasRequiredRole) return fallback
+  }
+
+  // Check permissions
+  if (permissions.length > 0) {
+    const hasRequiredPermissions = requireAll
+      ? permissions.every(perm => hasPermission(perm))
+      : permissions.some(perm => hasPermission(perm))
+
+    if (!hasRequiredPermissions) return fallback
+  }
+
+  return <>{children}</>
+}
+
+// components/auth/RoleDisplay.tsx
+// Display user's role badge
+export function RoleDisplay() {
+  const { user } = useAuth()
+
+  if (!user) return null
+
+  const roleColors: Record<string, string> = {
+    owner: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100',
+    admin: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
+    manager: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100',
+    sales_agent: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100',
+    fleet_coordinator: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100',
+    accountant: 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-100',
+    receptionist: 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-100',
+  }
+
+  const roleLabels: Record<string, string> = {
+    owner: 'Owner',
+    admin: 'Administrator',
+    manager: 'Manager',
+    sales_agent: 'Sales Agent',
+    fleet_coordinator: 'Fleet Coordinator',
+    accountant: 'Accountant',
+    receptionist: 'Receptionist',
+  }
+
+  return (
+    <span
+      className={`px-2 py-1 rounded-full text-xs font-semibold ${
+        roleColors[user.role] || 'bg-gray-100 text-gray-800'
+      }`}
+    >
+      {roleLabels[user.role] || user.role}
+    </span>
+  )
+}
+
+
+"use client"
+
+import { useState, useEffect } from "react"
+import { BarChart3, Car, CreditCard, Users, TrendingUp, AlertCircle, Calendar, DollarSign } from "lucide-react"
+import { KPICard } from "@/components/dashboard/kpi-card"
+import { QuickActions } from "@/components/dashboard/quick-actions"
+import { DataTable } from "@/components/dashboard/data-table"
+import { useDashboard } from "@/hooks/useAnalytics"
+import toast from "react-hot-toast"
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+
+export default function DashboardPage() {
+  const [companyName, setCompanyName] = useState("Your Company")
+  const [token, setToken] = useState<string | null>(
+    typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
+  )
+  const [dateRange] = useState({
+    period: 'month' as 'today' | 'week' | 'month' | 'quarter' | 'year',
+  })
+
+  // Fetch dashboard KPIs
+  const { 
+    data: dashboardData, 
+    loading: dashboardLoading, 
+    error: dashboardError,
+    refetch: refetchDashboard 
+  } = useDashboard({ period: dateRange.period })
+
+  // Fetch company profile
+  useEffect(() => {
+    if (token) {
+      fetch(`${API_URL}/api/company/profile`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      .then(res => {
+        if (!res.ok) {
+          if (res.status === 401) {
+            toast.error("Session expired. Please log in again.")
+            localStorage.removeItem('accessToken')
+            setToken(null)
+            if (typeof window !== 'undefined') {
+              window.location.href = '/login'
+            }
+            return null
+          }
+          throw new Error(`HTTP ${res.status}`)
+        }
+        return res.json()
+      })
+      .then(responseData => {
+        if (responseData) {
+          const { data } = responseData
+          const { company } = data || {}
+          if (company) {
+            setCompanyName(company.name || "Your Company")
+          }
+        }
+      })
+      .catch((error) => {
+        console.error("Fetch company error:", error)
+        toast.error("Failed to load company data")
+      })
+    }
+  }, [token])
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('fr-DZ', {
+      style: 'decimal',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value)
+  }
+
+  if (dashboardLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (dashboardError) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-16 h-16 text-destructive mx-auto mb-4" />
+          <h2 className="text-xl font-semibold mb-2">Failed to Load Dashboard</h2>
+          <p className="text-muted-foreground mb-4">{dashboardError}</p>
+          <button 
+            onClick={() => refetchDashboard()}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const revenue = dashboardData?.revenue || { total: 0, average_transaction: 0, payment_count: 0 }
+  const fleet = dashboardData?.fleet || { 
+    total_vehicles: 0, 
+    active_rentals: 0, 
+    available_vehicles: 0, 
+    maintenance_vehicles: 0,
+    average_utilization: 0 
+  }
+  const customers = dashboardData?.customers || { 
+    total: 0, 
+    new: 0, 
+    repeat: 0, 
+    retention_rate: 0 
+  }
+  const topVehicles = dashboardData?.top_vehicles || []
+
+  return (
+    <ProtectedRoute requiredPermissions={['view_dashboard']}>
+      <div className="space-y-8">
+        {/* Page Header */}
+        <div>
+          <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
+          <p className="text-muted-foreground">
+            Welcome back, {companyName}! Here's your business overview for the past month.
+          </p>
+        </div>
+
+        {/* Primary KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <KPICard
+            label="Total Revenue"
+            value={formatCurrency(revenue.total)}
+            suffix="DZD"
+            icon={<DollarSign className="w-6 h-6" />}
+          />
+          <KPICard 
+            label="Active Rentals" 
+            value={fleet.active_rentals} 
+            icon={<Car className="w-6 h-6" />} 
+          />
+          <KPICard 
+            label="Available Vehicles" 
+            value={fleet.available_vehicles} 
+            icon={<Car className="w-6 h-6" />} 
+          />
+          <KPICard
+            label="Total Customers"
+            value={customers.total}
+            icon={<Users className="w-6 h-6" />}
+          />
+        </div>
+
+        {/* Secondary KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <KPICard
+            label="Avg Transaction"
+            value={formatCurrency(revenue.average_transaction)}
+            suffix="DZD"
+            icon={<CreditCard className="w-6 h-6" />}
+          />
+          <KPICard
+            label="Fleet Utilization"
+            value={`${fleet.average_utilization.toFixed(1)}%`}
+            icon={<TrendingUp className="w-6 h-6" />}
+          />
+          <KPICard
+            label="Maintenance Vehicles"
+            value={fleet.maintenance_vehicles}
+            icon={<AlertCircle className="w-6 h-6" />}
+          />
+          <KPICard
+            label="Retention Rate"
+            value={`${customers.retention_rate.toFixed(1)}%`}
+            icon={<Users className="w-6 h-6" />}
+          />
+        </div>
+
+        {/* Quick Actions */}
+        <div>
+          <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
+          <QuickActions
+            actions={[
+              { label: "New Rental", href: "/dashboard/contracts/new" },
+              { label: "Add Vehicle", href: "/dashboard/vehicles/new" },
+              { label: "Register Customer", href: "/dashboard/customers/new" },
+              { label: "View Analytics", href: "/dashboard/analytics" },
+            ]}
+          />
+        </div>
+
+        {/* Fleet Overview */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="p-6 rounded-lg border border-border bg-card">
+            <h3 className="font-semibold mb-4 flex items-center gap-2">
+              <Car className="w-5 h-5" />
+              Fleet Status
+            </h3>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Total Vehicles</span>
+                <span className="font-semibold text-lg">{fleet.total_vehicles}</span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+                <div className="h-full flex">
+                  <div 
+                    className="bg-green-500" 
+                    style={{ 
+                      width: `${(fleet.available_vehicles / fleet.total_vehicles) * 100}%` 
+                    }}
+                    title={`Available: ${fleet.available_vehicles}`}
+                  />
+                  <div 
+                    className="bg-blue-500" 
+                    style={{ 
+                      width: `${(fleet.active_rentals / fleet.total_vehicles) * 100}%` 
+                    }}
+                    title={`Rented: ${fleet.active_rentals}`}
+                  />
+                  <div 
+                    className="bg-amber-500" 
+                    style={{ 
+                      width: `${(fleet.maintenance_vehicles / fleet.total_vehicles) * 100}%` 
+                    }}
+                    title={`Maintenance: ${fleet.maintenance_vehicles}`}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full bg-green-500" />
+                  <span>Available ({fleet.available_vehicles})</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full bg-blue-500" />
+                  <span>Rented ({fleet.active_rentals})</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full bg-amber-500" />
+                  <span>Maintenance ({fleet.maintenance_vehicles})</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6 rounded-lg border border-border bg-card">
+            <h3 className="font-semibold mb-4 flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Customer Insights
+            </h3>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">New Customers</span>
+                <span className="font-semibold text-lg text-green-600">{customers.new}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Repeat Customers</span>
+                <span className="font-semibold text-lg text-blue-600">{customers.repeat}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Retention Rate</span>
+                <span className="font-semibold text-lg text-accent">
+                  {customers.retention_rate.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Top Performing Vehicles */}
+        {topVehicles.length > 0 && (
+          <div>
+            <h2 className="text-lg font-semibold mb-4">Top Performing Vehicles</h2>
+            <DataTable
+              columns={[
+                { 
+                  key: "vehicle", 
+                  label: "Vehicle", 
+                  sortable: true,
+                  render: (_, row) => `${row.brand} ${row.model}`
+                },
+                { 
+                  key: "registration_number", 
+                  label: "Registration",
+                  sortable: true 
+                },
+                {
+                  key: "utilization_rate",
+                  label: "Utilization",
+                  render: (value) => (
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 h-2 rounded-full bg-muted">
+                        <div 
+                          className="h-full rounded-full bg-accent" 
+                          style={{ width: `${Math.min(value, 100)}%` }} 
+                        />
+                      </div>
+                      <span className="text-sm">{value.toFixed(1)}%</span>
+                    </div>
+                  ),
+                  sortable: true,
+                },
+                {
+                  key: "total_revenue",
+                  label: "Revenue",
+                  render: (value) => `${formatCurrency(value)} DZD`,
+                  sortable: true,
+                },
+              ]}
+              data={topVehicles}
+            />
+          </div>
+        )}
+
+        {/* Revenue & Payments Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 rounded-lg border border-border bg-card">
+            <p className="text-sm text-muted-foreground mb-2">Total Payments</p>
+            <p className="text-2xl font-semibold">{revenue.payment_count}</p>
+            <p className="text-xs text-muted-foreground mt-2">Completed transactions</p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card">
+            <p className="text-sm text-muted-foreground mb-2">Monthly Revenue</p>
+            <p className="text-2xl font-semibold">{formatCurrency(revenue.total)} DZD</p>
+            <p className="text-xs text-accent mt-2">For selected period</p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-card">
+            <p className="text-sm text-muted-foreground mb-2">Average Transaction</p>
+            <p className="text-2xl font-semibold">{formatCurrency(revenue.average_transaction)} DZD</p>
+            <p className="text-xs text-muted-foreground mt-2">Per rental</p>
+          </div>
+        </div>
+
+        {/* Alerts & Notifications */}
+        <div>
+          <h2 className="text-lg font-semibold mb-4">Alerts & Notifications</h2>
+          <div className="space-y-3">
+            {fleet.maintenance_vehicles > 0 && (
+              <div className="p-4 rounded-lg border-l-4 border-l-amber-500 bg-amber-50 dark:bg-amber-950">
+                <p className="font-semibold text-sm">Vehicles in Maintenance</p>
+                <p className="text-sm text-muted-foreground">
+                  {fleet.maintenance_vehicles} vehicle{fleet.maintenance_vehicles > 1 ? 's' : ''} currently under maintenance
+                </p>
+              </div>
+            )}
+            {fleet.available_vehicles === 0 && (
+              <div className="p-4 rounded-lg border-l-4 border-l-destructive bg-destructive/10">
+                <p className="font-semibold text-sm">No Available Vehicles</p>
+                <p className="text-sm text-muted-foreground">
+                  All vehicles are currently rented or in maintenance
+                </p>
+              </div>
+            )}
+            {customers.retention_rate < 50 && (
+              <div className="p-4 rounded-lg border-l-4 border-l-amber-500 bg-amber-50 dark:bg-amber-950">
+                <p className="font-semibold text-sm">Low Retention Rate</p>
+                <p className="text-sm text-muted-foreground">
+                  Customer retention is at {customers.retention_rate.toFixed(1)}%. Consider loyalty programs.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </ProtectedRoute>
+  )
+}
+
+
+import type React from "react";
+import { Geist, Geist_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import "./globals.css";
+import { AuthProvider } from '@/context/AuthContext'
+import { Toaster } from "react-hot-toast";
+
+
+const _geist = Geist({ subsets: ["latin"] });
+const _geistMono = Geist_Mono({ subsets: ["latin"] });
+
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <html lang="en">
+      <head>
+        <meta name="application-name" content="CarManager" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="CarManager" />
+        <meta name="format-detection" content="telephone=no" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <link rel="apple-touch-icon" href="/apple-icon.png" />
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#10B981" />
+        <link rel="apple-touch-icon" href="/apple-icon.png" />
+
+      </head>
+      <body className="font-sans antialiased">
+        <AuthProvider>
+          {children}
+          <Toaster position="top-right" />
+        </AuthProvider>
+        <Analytics />
+      </body>
+    </html>
+  );
+}
+
+
+
+// app/dashboard/layout.tsx
+"use client"
+
+import { useState } from "react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+import {
+  LayoutDashboard,
+  Car,
+  Users,
+  FileText,
+  CreditCard,
+  BarChart3,
+  Settings,
+  Menu,
+  X,
+  LogOut,
+  UserCircle,
+  ChevronDown,
+} from "lucide-react"
+import { useAuth } from "@/context/AuthContext"
+import { PermissionGate, RoleDisplay } from "@/components/auth/ProtectedRoute"
+
+interface NavItem {
+  label: string
+  href: string
+  icon: React.ReactNode
+  permissions?: string[]
+  roles?: string[]
+}
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const pathname = usePathname()
+  const { user, logout } = useAuth()
+
+  // Define navigation items with their required permissions
+  const navItems: NavItem[] = [
+    {
+      label: "Dashboard",
+      href: "/dashboard",
+      icon: <LayoutDashboard className="w-5 h-5" />,
+      permissions: ["view_dashboard"],
+    },
+    {
+      label: "Vehicles",
+      href: "/dashboard/vehicles",
+      icon: <Car className="w-5 h-5" />,
+      permissions: ["view_vehicles"],
+    },
+    {
+      label: "Customers",
+      href: "/dashboard/customers",
+      icon: <Users className="w-5 h-5" />,
+      permissions: ["view_customers"],
+    },
+    {
+      label: "Contracts",
+      href: "/dashboard/contracts",
+      icon: <FileText className="w-5 h-5" />,
+      permissions: ["view_contracts"],
+    },
+    {
+      label: "Payments",
+      href: "/dashboard/payments",
+      icon: <CreditCard className="w-5 h-5" />,
+      permissions: ["view_payments"],
+    },
+    {
+      label: "Analytics",
+      href: "/dashboard/analytics",
+      icon: <BarChart3 className="w-5 h-5" />,
+      permissions: ["view_analytics"],
+    },
+    {
+      label: "HR & Employees",
+      href: "/dashboard/hr",
+      icon: <UserCircle className="w-5 h-5" />,
+      roles: ["owner", "admin", "manager"],
+    },
+    {
+      label: "Settings",
+      href: "/dashboard/settings",
+      icon: <Settings className="w-5 h-5" />,
+      permissions: ["manage_settings"],
+    },
+  ]
+
+  const isActive = (href: string) => {
+    if (href === "/dashboard") {
+      return pathname === href
+    }
+    return pathname.startsWith(href)
+  }
+
+  const handleLogout = () => {
+    logout()
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={`fixed top-0 left-0 z-50 h-full w-64 bg-card border-r border-border transition-transform duration-300 lg:translate-x-0 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex flex-col h-full">
+          {/* Logo */}
+          <div className="p-6 border-b border-border">
+            <Link href="/dashboard" className="flex items-center gap-2">
+              <Car className="w-8 h-8 text-primary" />
+              <span className="text-xl font-bold">CarRental</span>
+            </Link>
+          </div>
+
+          {/* Navigation */}
+          <nav className="flex-1 overflow-y-auto p-4">
+            <ul className="space-y-1">
+              {navItems.map((item) => (
+                <PermissionGate
+                  key={item.href}
+                  permissions={item.permissions}
+                  roles={item.roles}
+                >
+                  <li>
+                    <Link
+                      href={item.href}
+                      className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                        isActive(item.href)
+                          ? "bg-primary text-primary-foreground"
+                          : "hover:bg-muted"
+                      }`}
+                      onClick={() => setSidebarOpen(false)}
+                    >
+                      {item.icon}
+                      <span className="font-medium">{item.label}</span>
+                    </Link>
+                  </li>
+                </PermissionGate>
+              ))}
+            </ul>
+          </nav>
+
+          {/* User section */}
+          <div className="p-4 border-t border-border">
+            <div className="relative">
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-muted transition-colors"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <UserCircle className="w-6 h-6 text-primary" />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="font-medium text-sm">{user?.full_name}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <RoleDisplay />
+                  </div>
+                </div>
+                <ChevronDown className="w-4 h-4" />
+              </button>
+
+              {/* User dropdown menu */}
+              {userMenuOpen && (
+                <div className="absolute bottom-full left-0 right-0 mb-2 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
+                  <div className="p-3 border-b border-border">
+                    <p className="text-xs text-muted-foreground">{user?.email}</p>
+                  </div>
+                  <Link
+                    href="/dashboard/settings/profile"
+                    className="flex items-center gap-2 px-4 py-2 hover:bg-muted transition-colors"
+                    onClick={() => {
+                      setUserMenuOpen(false)
+                      setSidebarOpen(false)
+                    }}
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span className="text-sm">Profile Settings</span>
+                  </Link>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2 px-4 py-2 hover:bg-muted transition-colors text-destructive"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span className="text-sm">Logout</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div className="lg:pl-64">
+        {/* Top bar */}
+        <header className="sticky top-0 z-30 bg-card border-b border-border">
+          <div className="flex items-center justify-between px-6 py-4">
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="lg:hidden p-2 hover:bg-muted rounded-lg"
+            >
+              {sidebarOpen ? (
+                <X className="w-6 h-6" />
+              ) : (
+                <Menu className="w-6 h-6" />
+              )}
+            </button>
+
+            <div className="flex-1 lg:flex-none">
+              <h2 className="text-lg font-semibold lg:hidden">
+                {navItems.find((item) => isActive(item.href))?.label || "Dashboard"}
+              </h2>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="hidden lg:flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Logged in as
+                </span>
+                <RoleDisplay />
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Page content */}
+        <main className="p-6">{children}</main>
+      </div>
+    </div>
+  )
+}
+
+
+// lib/api/employees.ts
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+
+export interface Employee {
+  id: string;
+  user_id: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  role: 'owner' | 'admin' | 'manager' | 'sales_agent' | 'fleet_coordinator' | 'accountant' | 'receptionist';
+  department?: 'management' | 'sales' | 'fleet' | 'finance' | 'customer_service' | 'operations';
+  position?: string;
+  status: 'active' | 'on_leave' | 'suspended' | 'terminated';
+  salary_type?: 'hourly' | 'monthly' | 'commission' | 'fixed_plus_commission';
+  salary?: number;
+  commission_rate?: number;
+  hire_date: string;
+  termination_date?: string;
+  work_schedule?: Record<string, { start: string; end: string }>;
+  custom_permissions?: Record<string, boolean>;
+  total_contracts_created?: number;
+  total_revenue_generated?: number;
+  user?: {
+    id: string;
+    email: string;
+    role: string;
+    is_active: boolean;
+    last_login_at?: string;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Role {
+  value: string;
+  label: string;
+  description: string;
+  permissions: string[];
+}
+
+export interface EmployeeStats {
+  total_employees: number;
+  by_status: {
+    active: number;
+    on_leave: number;
+    terminated: number;
+  };
+  by_role: Record<string, number>;
+  top_performers: Array<{
+    id: string;
+    full_name: string;
+    role: string;
+    total_contracts_created: number;
+    total_revenue_generated: number;
+  }>;
+}
+
+export interface CreateEmployeeData {
+  full_name: string;
+  email: string;
+  phone: string;
+  password: string;
+  role: string;
+  department?: string;
+  position?: string;
+  salary_type?: string;
+  salary?: number;
+  commission_rate?: number;
+  hire_date: string;
+  work_schedule?: Record<string, { start: string; end: string }>;
+  custom_permissions?: Record<string, boolean>;
+  address?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  notes?: string;
+}
+
+export interface UpdateEmployeeData {
+  full_name?: string;
+  phone?: string;
+  position?: string;
+  department?: string;
+  salary?: number;
+  commission_rate?: number;
+  status?: string;
+  custom_permissions?: Record<string, boolean>;
+  work_schedule?: Record<string, { start: string; end: string }>;
+}
+
+class EmployeeAPI {
+  private getHeaders(): HeadersInit {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+    };
+  }
+
+  private async handleResponse<T>(response: Response): Promise<T> {
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Request failed' }));
+      throw new Error(error.message || `HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    return data.data || data;
+  }
+
+  // Get all employees with filters
+  async getEmployees(params?: {
+    status?: string;
+    role?: string;
+    department?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+    sort_by?: string;
+    sort_order?: 'ASC' | 'DESC';
+  }): Promise<{ employees: Employee[]; meta: any }> {
+    const queryParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          queryParams.append(key, String(value));
+        }
+      });
+    }
+
+    const response = await fetch(
+      `${API_URL}/api/employees?${queryParams.toString()}`,
+      { headers: this.getHeaders() }
+    );
+    return this.handleResponse(response);
+  }
+
+  // Get single employee
+  async getEmployee(id: string): Promise<{ employee: Employee }> {
+    const response = await fetch(`${API_URL}/api/employees/${id}`, {
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Create new employee
+  async createEmployee(data: CreateEmployeeData): Promise<{ employee: Employee }> {
+    const response = await fetch(`${API_URL}/api/employees`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Update employee
+  async updateEmployee(id: string, data: UpdateEmployeeData): Promise<{ employee: Employee }> {
+    const response = await fetch(`${API_URL}/api/employees/${id}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Terminate employee
+  async terminateEmployee(id: string): Promise<{ employee: Employee }> {
+    const response = await fetch(`${API_URL}/api/employees/${id}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Reset employee password
+  async resetPassword(id: string, newPassword: string): Promise<void> {
+    const response = await fetch(`${API_URL}/api/employees/${id}/reset-password`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ new_password: newPassword }),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Get employee statistics
+  async getStats(): Promise<{ stats: EmployeeStats }> {
+    const response = await fetch(`${API_URL}/api/employees/stats`, {
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Get available roles
+  async getRoles(): Promise<{ roles: Role[] }> {
+    const response = await fetch(`${API_URL}/api/employees/roles`, {
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse(response);
+  }
+}
+
+export const employeeAPI = new EmployeeAPI();
+
+
+
+
+// lib/api/employees.ts
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+
+export interface Employee {
+  id: string;
+  user_id: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  role: 'owner' | 'admin' | 'manager' | 'sales_agent' | 'fleet_coordinator' | 'accountant' | 'receptionist';
+  department?: 'management' | 'sales' | 'fleet' | 'finance' | 'customer_service' | 'operations';
+  position?: string;
+  status: 'active' | 'on_leave' | 'suspended' | 'terminated';
+  salary_type?: 'hourly' | 'monthly' | 'commission' | 'fixed_plus_commission';
+  salary?: number;
+  commission_rate?: number;
+  hire_date: string;
+  termination_date?: string;
+  work_schedule?: Record<string, { start: string; end: string }>;
+  custom_permissions?: Record<string, boolean>;
+  total_contracts_created?: number;
+  total_revenue_generated?: number;
+  user?: {
+    id: string;
+    email: string;
+    role: string;
+    is_active: boolean;
+    last_login_at?: string;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Role {
+  value: string;
+  label: string;
+  description: string;
+  permissions: string[];
+}
+
+export interface EmployeeStats {
+  total_employees: number;
+  by_status: {
+    active: number;
+    on_leave: number;
+    terminated: number;
+  };
+  by_role: Record<string, number>;
+  top_performers: Array<{
+    id: string;
+    full_name: string;
+    role: string;
+    total_contracts_created: number;
+    total_revenue_generated: number;
+  }>;
+}
+
+export interface CreateEmployeeData {
+  full_name: string;
+  email: string;
+  phone: string;
+  password: string;
+  role: string;
+  department?: string;
+  position?: string;
+  salary_type?: string;
+  salary?: number;
+  commission_rate?: number;
+  hire_date: string;
+  work_schedule?: Record<string, { start: string; end: string }>;
+  custom_permissions?: Record<string, boolean>;
+  address?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  notes?: string;
+}
+
+export interface UpdateEmployeeData {
+  full_name?: string;
+  phone?: string;
+  position?: string;
+  department?: string;
+  salary?: number;
+  commission_rate?: number;
+  status?: string;
+  custom_permissions?: Record<string, boolean>;
+  work_schedule?: Record<string, { start: string; end: string }>;
+}
+
+class EmployeeAPI {
+  private getHeaders(): HeadersInit {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    return {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+    };
+  }
+
+  private async handleResponse<T>(response: Response): Promise<T> {
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Request failed' }));
+      throw new Error(error.message || `HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    return data.data || data;
+  }
+
+  // Get all employees with filters
+  async getEmployees(params?: {
+    status?: string;
+    role?: string;
+    department?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+    sort_by?: string;
+    sort_order?: 'ASC' | 'DESC';
+  }): Promise<{ employees: Employee[]; meta: any }> {
+    const queryParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          queryParams.append(key, String(value));
+        }
+      });
+    }
+
+    const response = await fetch(
+      `${API_URL}/api/employees?${queryParams.toString()}`,
+      { headers: this.getHeaders() }
+    );
+    return this.handleResponse(response);
+  }
+
+  // Get single employee
+  async getEmployee(id: string): Promise<{ employee: Employee }> {
+    const response = await fetch(`${API_URL}/api/employees/${id}`, {
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Create new employee
+  async createEmployee(data: CreateEmployeeData): Promise<{ employee: Employee }> {
+    const response = await fetch(`${API_URL}/api/employees`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Update employee
+  async updateEmployee(id: string, data: UpdateEmployeeData): Promise<{ employee: Employee }> {
+    const response = await fetch(`${API_URL}/api/employees/${id}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Terminate employee
+  async terminateEmployee(id: string): Promise<{ employee: Employee }> {
+    const response = await fetch(`${API_URL}/api/employees/${id}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Reset employee password
+  async resetPassword(id: string, newPassword: string): Promise<void> {
+    const response = await fetch(`${API_URL}/api/employees/${id}/reset-password`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ new_password: newPassword }),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Get employee statistics
+  async getStats(): Promise<{ stats: EmployeeStats }> {
+    const response = await fetch(`${API_URL}/api/employees/stats`, {
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse(response);
+  }
+
+  // Get available roles
+  async getRoles(): Promise<{ roles: Role[] }> {
+    const response = await fetch(`${API_URL}/api/employees/roles`, {
+      headers: this.getHeaders(),
+    });
+    return this.handleResponse(response);
+  }
+}
+
+export const employeeAPI = new EmployeeAPI();

@@ -1,3 +1,4 @@
+// src/models/index.js (UPDATED WITH NOTIFICATION)
 const { sequelize } = require('../config/database');
 
 // Import all models
@@ -9,6 +10,9 @@ const Contract = require('./Contract');
 const Payment = require('./Payment');
 const VehicleCost = require('./VehicleCost');
 const Employee = require('./Employee');
+const Notification = require('./Notification');
+const Attendance = require('./Attendance');
+const { Payroll } = require('./Payroll');
 
 // ============================================
 // COMPANY RELATIONSHIPS
@@ -30,6 +34,9 @@ Employee.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
 
 Company.hasMany(Payment, { foreignKey: 'company_id', as: 'payments' });
 Payment.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+Company.hasMany(Notification, { foreignKey: 'company_id', as: 'notifications' });
+Notification.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
 
 // ============================================
 // CONTRACT RELATIONSHIPS
@@ -70,6 +77,42 @@ VehicleCost.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
 User.hasOne(Employee, { foreignKey: 'user_id', as: 'employee_profile' });
 Employee.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+Employee.hasMany(Contract, { 
+  foreignKey: 'created_by', 
+  sourceKey: 'user_id',
+  as: 'created_contracts' 
+});
+
+Employee.hasMany(Payment, { 
+  foreignKey: 'processed_by',
+  sourceKey: 'user_id', 
+  as: 'processed_payments' 
+});
+
+// ============================================
+// NOTIFICATION RELATIONSHIPS
+// ============================================
+User.hasMany(Notification, { foreignKey: 'user_id', as: 'notifications' });
+Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+
+
+
+Employee.hasMany(Attendance, { foreignKey: 'employee_id', as: 'attendance_records' });
+Attendance.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+
+Employee.hasMany(Payroll, { foreignKey: 'employee_id', as: 'payroll_records' });
+Payroll.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+
+Company.hasMany(Attendance, { foreignKey: 'company_id', as: 'attendance_records' });
+Attendance.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+Company.hasMany(Payroll, { foreignKey: 'company_id', as: 'payroll_records' });
+Payroll.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// ============================================
+// EXPORT ALL MODELS
+// ============================================
 module.exports = {
   sequelize,
   Company,
@@ -80,6 +123,7 @@ module.exports = {
   Payment,
   VehicleCost,
   Employee,
+  Notification,
+  Attendance,
+  Payroll,
 };
-
-

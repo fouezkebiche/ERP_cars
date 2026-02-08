@@ -1,7 +1,6 @@
 // src/routes/auth.routes.js
 const express = require('express');
 const router = express.Router();
-
 const {
   register,
   login,
@@ -10,18 +9,14 @@ const {
   refresh,
 } = require('../controllers/auth.controller');
 const { authenticateToken } = require('../middleware/auth.middleware');
-const { requireRole } = require('../middleware/permissions.middleware');
 
 // Public routes (no auth)
 router.post('/register', register);
 router.post('/login', login);
 router.post('/refresh', refresh);
-router.post('/logout', refresh_token => { // Wait, no—logout needs refresh token, but can be after auth
-  // Actually, logout can be public if providing refresh_token in body
-  router.post('/logout', logout);
-});
 
-// Protected routes
-router.get('/me', authenticateToken, requireRole(['owner', 'staff']), getMe); // Example: owner/staff only
+// Protected routes: Auth only (NO RBAC/requireRole—skip employee fetch)
+router.get('/me', authenticateToken, getMe); // Token verify only—no role/permission check
+router.post('/logout', authenticateToken, logout); // Logout after auth
 
 module.exports = router;

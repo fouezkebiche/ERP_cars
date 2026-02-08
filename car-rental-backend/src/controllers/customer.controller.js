@@ -234,6 +234,7 @@ const createCustomer = [
   body('license_expiry_date').optional().isISO8601().withMessage('Valid date required'),
   body('emergency_contact_name').optional().trim(),
   body('emergency_contact_phone').optional().trim(),
+  body('apply_tier_discount').optional().isBoolean(),
   body('notes').optional().trim(),
 
   async (req, res) => {
@@ -300,6 +301,7 @@ const updateCustomer = [
   body('drivers_license_number').optional().trim(),
   body('license_expiry_date').optional().isISO8601(),
   body('is_blacklisted').optional().isBoolean(),
+  body('apply_tier_discount').optional().isBoolean(),
   body('notes').optional().trim(),
 
   async (req, res) => {
