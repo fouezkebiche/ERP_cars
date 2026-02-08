@@ -488,7 +488,10 @@ export default function ContractsPage() {
                     {alertsByContract[row.id] > 0 ? (
                       <div className="flex items-center gap-1">
                         <StatusBadge status="critical" label={`(${alertsByContract[row.id]})`} />
-                        <AlertCircle className="w-3 h-3 text-destructive" title="View Alerts" />
+                        <AlertCircle
+                          className="w-3 h-3 text-destructive"
+                          aria-label="View Alerts"
+                        />
                       </div>
                     ) : (
                       <span className="text-xs text-muted-foreground">None</span>
