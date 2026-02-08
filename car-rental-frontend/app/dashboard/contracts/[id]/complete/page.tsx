@@ -287,21 +287,21 @@ export default function CompleteContractPage() {
                   </div>
                 )}
                 
-                {overageEstimate?.estimated_overage?.km_overage! > 0 && (
+                {overageEstimate?.estimated_overage?.km_overage && overageEstimate.estimated_overage.km_overage > 0 && (
                   <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg space-y-1">
                     <p className="font-medium text-red-800 dark:text-red-200">
                       KM Overage Charges
                     </p>
                     <p className="text-xs">
-                      {overageEstimate.estimated_overage.km_overage.toLocaleString()} km over limit
+                      {overageEstimate.estimated_overage?.km_overage?.toLocaleString()} km over limit
                     </p>
                     <p className="text-lg font-bold text-red-600">
-                      +{overageEstimate.estimated_overage.final_overage_charges.toLocaleString()} DZD
+                      +{overageEstimate.estimated_overage?.final_overage_charges?.toLocaleString()} DZD
                     </p>
-                    {overageEstimate.estimated_overage.discount_amount > 0 && (
+                    {overageEstimate.estimated_overage?.discount_amount > 0 && (
                       <p className="text-xs text-green-600">
-                        (Saved {overageEstimate.estimated_overage.discount_amount.toLocaleString()} DZD 
-                        with {overageEstimate.estimated_overage.tier_name} discount)
+                        (Saved {overageEstimate.estimated_overage?.discount_amount?.toLocaleString()} DZD 
+                        with {overageEstimate.estimated_overage?.tier_name} discount)
                       </p>
                     )}
                   </div>
