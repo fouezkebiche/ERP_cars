@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Loader2, Edit2, Trash2, X } from "lucide-react"  // STEP 3: Add X for dismiss
+import { ArrowLeft, Loader2, Edit2, Trash2, X,AlertCircle } from "lucide-react"  // STEP 3: Add X for dismiss
 import toast from "react-hot-toast"
 import { getVehicleById, deleteVehicle, type Vehicle } from "@/lib/vehicles.api"
 import { StatusBadge } from "@/components/dashboard/status-badge"
