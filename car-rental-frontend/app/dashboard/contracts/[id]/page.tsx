@@ -576,7 +576,7 @@ export default function ContractDetailPage() {
                           kmDriven={contract.actual_km_driven || (contract.end_mileage - (contract.start_mileage || 0))}
                           kmAllowed={contract.total_km_allowed}
                           dailyLimit={contract.daily_km_limit}
-                          tierBonus={contract.total_km_allowed - (contract.daily_km_limit * contract.total_days)}
+                          tierBonus={contract.total_km_allowed - ((contract.daily_km_limit || 0) * contract.total_days)}
                         />
                       ) : (
                         <p className="text-sm">
@@ -587,13 +587,13 @@ export default function ContractDetailPage() {
                     </div>
                   )}
 
-                  {contract.km_overage > 0 && (
+                  {(contract.km_overage ?? 0) > 0 && (
                     <div className="col-span-2 p-3 bg-red-50 dark:bg-red-950 rounded">
                       <p className="text-sm font-semibold text-red-800 dark:text-red-200">
-                        KM Overage: {contract.km_overage.toLocaleString()} km
+                        KM Overage: {(contract.km_overage ?? 0).toLocaleString()} km
                       </p>
                       <p className="text-xs text-red-600">
-                        Charge: {parseFloat(contract.overage_charges || '0').toLocaleString()} DZD
+                        Charge: {parseFloat(contract.overage_charges ?? '0').toLocaleString()} DZD
                       </p>
                     </div>
                   )}
