@@ -287,7 +287,7 @@ export default function CompleteContractPage() {
                   </div>
                 )}
                 
-                {overageEstimate?.estimated_overage.km_overage > 0 && (
+                {overageEstimate?.estimated_overage?.km_overage! > 0 && (
                   <div className="p-3 bg-red-50 dark:bg-red-950 rounded-lg space-y-1">
                     <p className="font-medium text-red-800 dark:text-red-200">
                       KM Overage Charges
