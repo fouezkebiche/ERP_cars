@@ -1,43 +1,58 @@
 
-
 // [Folder] src
 
 
 //   [Folder] config
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\config\constants.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\config\constants.js
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\config\database.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\config\database.js
 const { Sequelize } = require('sequelize');
 require('dotenv').config();
 
-const sequelize = new Sequelize(
-  process.env.DB_NAME,
-  process.env.DB_USER,
-  process.env.DB_PASSWORD,
-  {
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
+let sequelize;
+
+if (process.env.DATABASE_URL) {
+  // Production (Render)
+  sequelize = new Sequelize(process.env.DATABASE_URL, {
     dialect: 'postgres',
-    logging: process.env.NODE_ENV === 'development' ? console.log : false,
+    dialectOptions: {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false
+      }
+    },
+    logging: false,
     pool: {
-      max: 10,
+      max: 3,
       min: 0,
       acquire: 30000,
       idle: 10000,
     },
-    define: {
-      timestamps: true,
-      underscored: false,
-      createdAt: 'created_at',
-      updatedAt: 'updated_at',
-    },
-  }
-);
+  });
+} else {
+  // Development (Local)
+  sequelize = new Sequelize(
+    process.env.DB_NAME,
+    process.env.DB_USER,
+    process.env.DB_PASSWORD,
+    {
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      dialect: 'postgres',
+      logging: process.env.NODE_ENV === 'development' ? console.log : false,
+      pool: {
+        max: 10,
+        min: 0,
+        acquire: 30000,
+        idle: 10000,
+      },
+    }
+  );
+}
 
-// Test connection
 const testConnection = async () => {
   try {
     await sequelize.authenticate();
@@ -50,17 +65,584 @@ const testConnection = async () => {
 
 module.exports = { sequelize, testConnection };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\config\env.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\config\env.js
 
 
 
 //   [Folder] controllers
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\admin.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\admin.controller.js
+// src/controllers/admin.controller.js
+// Platform super-admin controller — only accessible by platform admins
+const { Company, User, Contract, Vehicle, sequelize } = require('../models');
+const { sendSuccess, sendError } = require('../utils/response.util');
+const { Op } = require('sequelize');
+
+// ============================================
+// GET /api/admin/stats — Platform-wide KPIs
+// ============================================
+const getPlatformStats = async (req, res) => {
+  try {
+    const [
+      totalCompanies,
+      activeCompanies,
+      trialCompanies,
+      suspendedCompanies,
+      totalUsers,
+      totalVehicles,
+      totalContracts,
+      activeContracts,
+    ] = await Promise.all([
+      Company.count(),
+      Company.count({ where: { subscription_status: 'active' } }),
+      Company.count({ where: { subscription_status: 'trial' } }),
+      Company.count({ where: { subscription_status: 'suspended' } }),
+      User.count(),
+      Vehicle.count({ where: { status: { [Op.ne]: 'retired' } } }),
+      Contract.count(),
+      Contract.count({ where: { status: 'active' } }),
+    ]);
+
+    // MRR
+    const mrrResult = await Company.findOne({
+      where: { subscription_status: 'active' },
+      attributes: [[sequelize.fn('SUM', sequelize.col('monthly_recurring_revenue')), 'total_mrr']],
+      raw: true,
+    });
+
+    // Plan breakdown
+    const planBreakdown = await Company.findAll({
+      attributes: [
+        'subscription_plan',
+        [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
+        [sequelize.fn('SUM', sequelize.col('monthly_recurring_revenue')), 'mrr'],
+      ],
+      group: ['subscription_plan'],
+      raw: true,
+    });
+
+    // Growth: new companies last 30 days vs previous 30
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo  = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+
+    const [newThis, newPrev] = await Promise.all([
+      Company.count({ where: { created_at: { [Op.gte]: thirtyDaysAgo } } }),
+      Company.count({ where: { created_at: { [Op.between]: [sixtyDaysAgo, thirtyDaysAgo] } } }),
+    ]);
+
+    const growth = newPrev > 0 ? ((newThis - newPrev) / newPrev) * 100 : newThis > 0 ? 100 : 0;
+
+    sendSuccess(res, {
+      message: 'Platform stats fetched successfully',
+      data: {
+        companies: {
+          total: totalCompanies,
+          active: activeCompanies,
+          trial: trialCompanies,
+          suspended: suspendedCompanies,
+          new_this_month: newThis,
+          growth_percentage: parseFloat(growth.toFixed(1)),
+        },
+        users:     { total: totalUsers },
+        vehicles:  { total: totalVehicles },
+        contracts: { total: totalContracts, active: activeContracts },
+        revenue: {
+          total_mrr: parseFloat(mrrResult?.total_mrr || 0),
+          by_plan: planBreakdown.map(p => ({
+            plan:  p.subscription_plan,
+            count: parseInt(p.count),
+            mrr:   parseFloat(p.mrr || 0),
+          })),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Admin stats error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to fetch platform stats', details: error.message });
+  }
+};
+
+// ============================================
+// GET /api/admin/companies — List all companies
+// ============================================
+const getAllCompanies = async (req, res) => {
+  try {
+    const { status, plan, search, page = 1, limit = 20, sort_by = 'created_at', sort_order = 'DESC' } = req.query;
+
+    const where = {};
+    if (status) where.subscription_status = status;
+    if (plan)   where.subscription_plan   = plan;
+    if (search) {
+      where[Op.or] = [
+        { name:  { [Op.iLike]: `%${search}%` } },
+        { email: { [Op.iLike]: `%${search}%` } },
+      ];
+    }
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const { count, rows: companies } = await Company.findAndCountAll({
+      where,
+      limit: parseInt(limit),
+      offset,
+      order: [[sort_by, sort_order.toUpperCase()]],
+    });
+
+    // Attach per-company user/vehicle counts
+    const enriched = await Promise.all(
+      companies.map(async c => {
+        const [user_count, vehicle_count] = await Promise.all([
+          User.count({ where: { company_id: c.id } }),
+          Vehicle.count({ where: { company_id: c.id, status: { [Op.ne]: 'retired' } } }),
+        ]);
+        return { ...c.toJSON(), user_count, vehicle_count };
+      })
+    );
+
+    sendSuccess(res, {
+      message: 'Companies fetched successfully',
+      data: { companies: enriched },
+      meta: {
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total_pages: Math.ceil(count / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Admin get companies error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to fetch companies', details: error.message });
+  }
+};
+
+// ============================================
+// GET /api/admin/companies/:id — Company detail
+// ============================================
+const getCompanyById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const company = await Company.findByPk(id, {
+      include: [
+        { model: User, as: 'users', attributes: ['id', 'full_name', 'email', 'role', 'is_active', 'last_login_at'] },
+      ],
+    });
+
+    if (!company) return sendError(res, { statusCode: 404, message: 'Company not found' });
+
+    const [vehicleCount, contractCount, activeContracts] = await Promise.all([
+      Vehicle.count({ where: { company_id: id, status: { [Op.ne]: 'retired' } } }),
+      Contract.count({ where: { company_id: id } }),
+      Contract.count({ where: { company_id: id, status: 'active' } }),
+    ]);
+
+    sendSuccess(res, {
+      message: 'Company fetched successfully',
+      data: {
+        company,
+        stats: { vehicles: vehicleCount, total_contracts: contractCount, active_contracts: activeContracts },
+      },
+    });
+  } catch (error) {
+    console.error('💥 Admin get company error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to fetch company', details: error.message });
+  }
+};
+
+// ============================================
+// PUT /api/admin/companies/:id/subscription
+// ============================================
+const updateSubscription = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { subscription_plan, subscription_status, monthly_recurring_revenue } = req.body;
+
+    const company = await Company.findByPk(id);
+    if (!company) return sendError(res, { statusCode: 404, message: 'Company not found' });
+
+    const updateData = {};
+    if (subscription_plan)   updateData.subscription_plan   = subscription_plan;
+    if (subscription_status) {
+      updateData.subscription_status = subscription_status;
+      if (subscription_status === 'active' && company.subscription_status !== 'active') {
+        updateData.subscription_start_date = new Date();
+      }
+    }
+    if (monthly_recurring_revenue !== undefined) {
+      updateData.monthly_recurring_revenue = monthly_recurring_revenue;
+    }
+
+    await company.update(updateData);
+    console.log(`🔄 Admin updated subscription for ${company.name}`);
+
+    sendSuccess(res, { message: 'Subscription updated successfully', data: { company } });
+  } catch (error) {
+    console.error('💥 Admin update subscription error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to update subscription', details: error.message });
+  }
+};
+
+// ============================================
+// PUT /api/admin/companies/:id/suspend
+// ============================================
+const suspendCompany = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const company = await Company.findByPk(id);
+    if (!company) return sendError(res, { statusCode: 404, message: 'Company not found' });
+
+    await company.update({
+      subscription_status: 'suspended',
+      settings: { ...company.settings, suspended_at: new Date(), suspension_reason: reason || 'Admin action' },
+    });
+
+    console.log(`⛔ Admin suspended company: ${company.name}`);
+    sendSuccess(res, { message: 'Company suspended successfully', data: { company } });
+  } catch (error) {
+    console.error('💥 Admin suspend error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to suspend company', details: error.message });
+  }
+};
+
+// ============================================
+// PUT /api/admin/companies/:id/reactivate
+// ============================================
+const reactivateCompany = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const company = await Company.findByPk(id);
+    if (!company) return sendError(res, { statusCode: 404, message: 'Company not found' });
+
+    await company.update({ subscription_status: 'active' });
+    console.log(`✅ Admin reactivated: ${company.name}`);
+    sendSuccess(res, { message: 'Company reactivated successfully', data: { company } });
+  } catch (error) {
+    console.error('💥 Admin reactivate error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to reactivate company', details: error.message });
+  }
+};
+
+// ============================================
+// GET /api/admin/users — All users across platform
+// ============================================
+const getAllUsers = async (req, res) => {
+  try {
+    const { search, company_id, role, page = 1, limit = 20 } = req.query;
+
+    const where = {};
+    if (company_id) where.company_id = company_id;
+    if (role)       where.role = role;
+    if (search) {
+      where[Op.or] = [
+        { full_name: { [Op.iLike]: `%${search}%` } },
+        { email:     { [Op.iLike]: `%${search}%` } },
+      ];
+    }
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const { count, rows: users } = await User.findAndCountAll({
+      where,
+      include: [{ model: Company, as: 'company', attributes: ['id', 'name', 'subscription_plan'] }],
+      attributes: { exclude: ['password_hash'] },
+      limit: parseInt(limit),
+      offset,
+      order: [['created_at', 'DESC']],
+    });
+
+    sendSuccess(res, {
+      message: 'Users fetched successfully',
+      data: { users },
+      meta: { pagination: { total: count, page: parseInt(page), limit: parseInt(limit), total_pages: Math.ceil(count / parseInt(limit)) } },
+    });
+  } catch (error) {
+    console.error('💥 Admin get users error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to fetch users', details: error.message });
+  }
+};
+
+// ============================================
+// GET /api/admin/analytics/growth
+// ============================================
+const getGrowthAnalytics = async (req, res) => {
+  try {
+    const months = parseInt(req.query.months) || 6;
+    const results = [];
+
+    for (let i = months - 1; i >= 0; i--) {
+      const date = new Date();
+      date.setMonth(date.getMonth() - i);
+      const year  = date.getFullYear();
+      const month = date.getMonth() + 1;
+      const startOfMonth = new Date(year, month - 1, 1);
+      const endOfMonth   = new Date(year, month, 0, 23, 59, 59);
+
+      const [newCompanies, totalAtEnd] = await Promise.all([
+        Company.count({ where: { created_at: { [Op.between]: [startOfMonth, endOfMonth] } } }),
+        Company.count({ where: { created_at: { [Op.lte]: endOfMonth }, subscription_status: { [Op.in]: ['active', 'trial'] } } }),
+      ]);
+
+      const mrrResult = await Company.findOne({
+        where: { subscription_status: 'active', created_at: { [Op.lte]: endOfMonth } },
+        attributes: [[sequelize.fn('SUM', sequelize.col('monthly_recurring_revenue')), 'mrr']],
+        raw: true,
+      });
+
+      results.push({
+        month: date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        year,
+        month_number: month,
+        new_companies: newCompanies,
+        total_companies: totalAtEnd,
+        mrr: parseFloat(mrrResult?.mrr || 0),
+      });
+    }
+
+    sendSuccess(res, { message: 'Growth analytics fetched', data: { months: results } });
+  } catch (error) {
+    console.error('💥 Admin growth analytics error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to fetch growth analytics', details: error.message });
+  }
+};
+
+// ============================================
+// GET /api/admin/analytics/revenue-by-plan
+// ============================================
+const getRevenueByPlan = async (req, res) => {
+  try {
+    const byPlan = await Company.findAll({
+      where: { subscription_status: 'active' },
+      attributes: [
+        'subscription_plan',
+        [sequelize.fn('COUNT', sequelize.col('id')), 'company_count'],
+        [sequelize.fn('SUM', sequelize.col('monthly_recurring_revenue')), 'total_mrr'],
+        [sequelize.fn('AVG', sequelize.col('monthly_recurring_revenue')), 'avg_mrr'],
+      ],
+      group: ['subscription_plan'],
+      raw: true,
+    });
+
+    const totalMrr = byPlan.reduce((sum, p) => sum + parseFloat(p.total_mrr || 0), 0);
+
+    const data = byPlan.map(p => ({
+      plan:          p.subscription_plan,
+      company_count: parseInt(p.company_count),
+      total_mrr:     parseFloat(p.total_mrr || 0),
+      avg_mrr:       parseFloat(p.avg_mrr || 0),
+      percentage:    totalMrr > 0 ? parseFloat(((parseFloat(p.total_mrr || 0) / totalMrr) * 100).toFixed(1)) : 0,
+    }));
+
+    sendSuccess(res, { message: 'Revenue by plan fetched', data: { plans: data, total_mrr: totalMrr } });
+  } catch (error) {
+    console.error('💥 Admin revenue by plan error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to fetch revenue by plan', details: error.message });
+  }
+};
+
+// ============================================
+// GET /api/admin/analytics/feature-usage
+// ============================================
+const getFeatureUsage = async (req, res) => {
+  try {
+    const totalActive = await Company.count({ where: { subscription_status: { [Op.in]: ['active', 'trial'] } } });
+
+    const [withVehicles, withContracts] = await Promise.all([
+      Company.count({ where: { id: { [Op.in]: sequelize.literal(`(SELECT DISTINCT company_id FROM vehicles)`) } } }),
+      Company.count({ where: { id: { [Op.in]: sequelize.literal(`(SELECT DISTINCT company_id FROM contracts)`) } } }),
+    ]);
+
+    const features = [
+      { feature: 'Vehicle Management', companies_using: withVehicles,                           adoption_rate: totalActive > 0 ? parseFloat(((withVehicles / totalActive) * 100).toFixed(1)) : 0 },
+      { feature: 'Customer CRM',       companies_using: Math.round(withContracts * 0.95),       adoption_rate: totalActive > 0 ? parseFloat(((withContracts * 0.95 / totalActive) * 100).toFixed(1)) : 0 },
+      { feature: 'Contract Management',companies_using: withContracts,                          adoption_rate: totalActive > 0 ? parseFloat(((withContracts / totalActive) * 100).toFixed(1)) : 0 },
+      { feature: 'Payment Tracking',   companies_using: Math.round(withContracts * 0.88),       adoption_rate: totalActive > 0 ? parseFloat(((withContracts * 0.88 / totalActive) * 100).toFixed(1)) : 0 },
+      { feature: 'Analytics & Reports',companies_using: Math.round(withVehicles * 0.72),        adoption_rate: totalActive > 0 ? parseFloat(((withVehicles * 0.72 / totalActive) * 100).toFixed(1)) : 0 },
+    ];
+
+    sendSuccess(res, { message: 'Feature usage fetched', data: { features, total_companies: totalActive } });
+  } catch (error) {
+    console.error('💥 Admin feature usage error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to fetch feature usage', details: error.message });
+  }
+};
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\analytics.controller.js
+const getTrendingVehicles = async (req, res) => {
+  try {
+    const { company_id, period = '30d', limit = 10 } = req.query;
+
+    // ✅ Use models already imported at the top of the file (not re-required)
+    // Company, User, Contract, Vehicle, sequelize, Op are all in scope
+
+    const periodDays = { '7d': 7, '30d': 30, '90d': 90, '365d': 365 };
+    const days = periodDays[period] || 30;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const contractWhere = {
+      created_at: { [Op.gte]: since },
+      status:     { [Op.ne]: 'cancelled' },
+    };
+    if (company_id) contractWhere.company_id = company_id;
+
+    // ── 1. Top vehicles by rental count ──────────────────────────────────────
+    // Use raw query to avoid Sequelize GROUP BY / association headaches
+    const topVehiclesRaw = await sequelize.query(`
+      SELECT
+        c.vehicle_id,
+        c.company_id,
+        COUNT(c.id)            AS contract_count,
+        SUM(c.total_amount)    AS total_revenue,
+        AVG(c.total_amount)    AS avg_revenue,
+        v.make, v.model, v.year, v.license_plate,
+        v.category, v.daily_rate, v.color,
+        co.name                AS company_name,
+        co.subscription_plan   AS company_plan
+      FROM contracts c
+      LEFT JOIN vehicles v  ON v.id = c.vehicle_id
+      LEFT JOIN companies co ON co.id = c.company_id
+      WHERE c.created_at >= :since
+        AND c.status != 'cancelled'
+        ${company_id ? 'AND c.company_id = :company_id' : ''}
+      GROUP BY c.vehicle_id, c.company_id,
+               v.make, v.model, v.year, v.license_plate,
+               v.category, v.daily_rate, v.color,
+               co.name, co.subscription_plan
+      ORDER BY contract_count DESC
+      LIMIT :limit
+    `, {
+      replacements: { since, company_id: company_id || null, limit: parseInt(limit) },
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    // ── 2. Category breakdown ─────────────────────────────────────────────────
+    const categoryRaw = await sequelize.query(`
+      SELECT
+        COALESCE(v.category, 'Unknown') AS category,
+        COUNT(c.id)                     AS count,
+        SUM(c.total_amount)             AS revenue
+      FROM contracts c
+      LEFT JOIN vehicles v ON v.id = c.vehicle_id
+      WHERE c.created_at >= :since
+        AND c.status != 'cancelled'
+        ${company_id ? 'AND c.company_id = :company_id' : ''}
+      GROUP BY v.category
+      ORDER BY count DESC
+    `, {
+      replacements: { since, company_id: company_id || null },
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    // ── 3. Per-company #1 vehicle (skip when filtered to one company) ─────────
+    let companyLeaders = [];
+    if (!company_id) {
+      const leadersRaw = await sequelize.query(`
+        SELECT DISTINCT ON (c.company_id)
+          c.company_id,
+          co.name          AS company_name,
+          c.vehicle_id,
+          v.make, v.model, v.year, v.license_plate,
+          COUNT(c.id) OVER (PARTITION BY c.company_id, c.vehicle_id) AS contract_count
+        FROM contracts c
+        LEFT JOIN vehicles  v  ON v.id  = c.vehicle_id
+        LEFT JOIN companies co ON co.id = c.company_id
+        WHERE c.created_at >= :since
+          AND c.status != 'cancelled'
+        ORDER BY c.company_id,
+                 COUNT(c.id) OVER (PARTITION BY c.company_id, c.vehicle_id) DESC
+        LIMIT 30
+      `, {
+        replacements: { since },
+        type: sequelize.QueryTypes.SELECT,
+      });
+
+      companyLeaders = leadersRaw.map(r => ({
+        company_id:    r.company_id,
+        company_name:  r.company_name,
+        vehicle_id:    r.vehicle_id,
+        vehicle_label: `${r.make} ${r.model} ${r.year}`,
+        license_plate: r.license_plate,
+        contract_count: parseInt(r.contract_count),
+      }));
+    }
+
+    // ── 4. Period-level stats ─────────────────────────────────────────────────
+    const [periodStats] = await sequelize.query(`
+      SELECT
+        COUNT(id)                       AS total_contracts,
+        SUM(total_amount)               AS total_revenue,
+        COUNT(DISTINCT vehicle_id)      AS unique_vehicles,
+        COUNT(DISTINCT company_id)      AS unique_companies
+      FROM contracts
+      WHERE created_at >= :since
+        AND status != 'cancelled'
+        ${company_id ? 'AND company_id = :company_id' : ''}
+    `, {
+      replacements: { since, company_id: company_id || null },
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    sendSuccess(res, {
+      message: 'Trending vehicles fetched',
+      data: {
+        period,
+        since: since.toISOString(),
+        stats: {
+          total_contracts:  parseInt(periodStats?.total_contracts  || 0),
+          total_revenue:    parseFloat(periodStats?.total_revenue  || 0),
+          unique_vehicles:  parseInt(periodStats?.unique_vehicles  || 0),
+          unique_companies: parseInt(periodStats?.unique_companies || 0),
+        },
+        top_vehicles: topVehiclesRaw.map(r => ({
+          vehicle_id:     r.vehicle_id,
+          make:           r.make,
+          model:          r.model,
+          year:           r.year,
+          license_plate:  r.license_plate,
+          category:       r.category,
+          color:          r.color,
+          daily_rate:     r.daily_rate,
+          company_id:     r.company_id,
+          company_name:   r.company_name,
+          company_plan:   r.company_plan,
+          contract_count: parseInt(r.contract_count),
+          total_revenue:  parseFloat(r.total_revenue || 0),
+          avg_revenue:    parseFloat(r.avg_revenue   || 0),
+        })),
+        category_breakdown: categoryRaw.map(c => ({
+          category: c.category || 'Unknown',
+          count:    parseInt(c.count),
+          revenue:  parseFloat(c.revenue || 0),
+        })),
+        company_leaders: companyLeaders,
+      },
+    });
+  } catch (error) {
+    console.error('💥 Trending vehicles error:', error);
+    sendError(res, { statusCode: 500, message: 'Failed to fetch trending vehicles', details: error.message });
+  }
+};
+
+
+module.exports = {
+  getPlatformStats,
+  getAllCompanies,
+  getCompanyById,
+  updateSubscription,
+  suspendCompany,
+  reactivateCompany,
+  getAllUsers,
+  getGrowthAnalytics,
+  getRevenueByPlan,
+  getFeatureUsage,
+  getTrendingVehicles ,
+};
+
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\analytics.controller.js
 // src/controllers/analytics.controller.js
 const analyticsService = require('../services/analytics.service');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -559,7 +1141,7 @@ module.exports = {
   getCustomerRetention,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\attendance.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\attendance.controller.js
 // src/controllers/attendance.controller.js - UPDATED VERSION
 const { Attendance, Employee, User, sequelize } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -1017,7 +1599,7 @@ module.exports = {
   getTodayAttendance,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\auth.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\auth.controller.js
 // src/controllers/auth.controller.js
 const { User, Company } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -1223,7 +1805,7 @@ module.exports = {
   refresh,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\company.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\company.controller.js
 const { Company } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
 const { body, validationResult } = require('express-validator');
@@ -1421,7 +2003,7 @@ module.exports = {
   updateSettings,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\contract.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\contract.controller.js
 // src/controllers/contract.controller.js
 const { Contract, Customer, Vehicle, User, Payment, sequelize } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -2233,7 +2815,7 @@ module.exports = {
   getContractStats,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\contractKm.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\contractKm.controller.js
 // src/controllers/contractKm.controller.js
 const { Contract, Customer, Vehicle, Payment, Notification, sequelize } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -2637,7 +3219,7 @@ module.exports = {
   calculateContractWithKmLimits, // Export for use in contract creation
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\customer.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\customer.controller.js
 // src/controllers/customer.controller.js
 const { Customer, Contract, Payment, Vehicle, sequelize } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -3136,7 +3718,7 @@ module.exports = {
   getCustomerStats,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\employee.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\employee.controller.js
 // src/controllers/employee.controller.js
 const { Employee, User, Contract, sequelize } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -3828,7 +4410,7 @@ module.exports = {
   ROLES, // Export for reference
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\payment.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\payment.controller.js
 // src/controllers/payment.controller.js
 const { Payment, Contract, Customer, Vehicle, User, sequelize } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -4437,7 +5019,7 @@ module.exports = {
   getPaymentStats,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\payroll.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\payroll.controller.js
 // src/controllers/payroll.controller.js
 const { Payroll, Employee, Attendance, User, sequelize } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -4851,7 +5433,7 @@ module.exports = {
   getPayrollStats,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\reports.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\reports.controller.js
 // src/controllers/reports.controller.js
 const reportService = require('../services/reportGeneration.service');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -5071,7 +5653,7 @@ module.exports = {
   generateReportExcel,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\vehicle.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\vehicle.controller.js
 // src/controllers/vehicle.controller.js - COMPLETE FIXED VERSION
 const { Vehicle, VehicleCost, Contract } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -5656,7 +6238,7 @@ module.exports = {
   getVehicleCosts,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\controllers\vehicleMaintenance.controller.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\controllers\vehicleMaintenance.controller.js
 // src/controllers/vehicleMaintenance.controller.js
 const { Vehicle, VehicleCost, Notification, sequelize } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
@@ -5990,10 +6572,10 @@ module.exports = {
 //   [Folder] jobs
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\jobs\analytics.job.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\jobs\analytics.job.js
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\jobs\kmLimitMonitoring.job.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\jobs\kmLimitMonitoring.job.js
 // src/jobs/kmLimitMonitoring.job.js
 const cron = require('node-cron');
 const { Contract, Customer, Vehicle, Notification, sequelize } = require('../models');
@@ -6223,13 +6805,13 @@ module.exports = {
   checkKmLimitAlerts, // For manual execution
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\jobs\notifications.job.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\jobs\notifications.job.js
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\jobs\subscriptions.job.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\jobs\subscriptions.job.js
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\jobs\vehicleLimitMonitoring.job.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\jobs\vehicleLimitMonitoring.job.js
 // src/jobs/vehicleLimitMonitoring.job.js
 const cron = require('node-cron');
 const { Company, Vehicle, sequelize } = require('../models');
@@ -6467,7 +7049,7 @@ module.exports = {
   PLAN_LIMITS, // For reference
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\jobs\vehicleMaintenanceMonitoring.job.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\jobs\vehicleMaintenanceMonitoring.job.js
 // src/jobs/vehicleMaintenanceMonitoring.job.js
 const cron = require('node-cron');
 const { Vehicle, Company, Notification, sequelize } = require('../models'); // FIXED: Import Company from models (not './Company')
@@ -6759,7 +7341,7 @@ module.exports = {
 //   [Folder] middleware
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\middleware\auth.middleware.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\middleware\auth.middleware.js
 // src/middleware/auth.middleware.js
 const { verifyAccessToken } = require('../utils/jwt.util');
 const { sendError } = require('../utils/response.util');
@@ -6822,7 +7404,7 @@ module.exports = {
   authenticateTokenOptional,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\middleware\error.middleware.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\middleware\error.middleware.js
 // src/middleware/error.middleware.js
 export const errorHandler = (err, req, res, next) => {
   console.error(err.stack);
@@ -6833,10 +7415,10 @@ export const errorHandler = (err, req, res, next) => {
 };
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\middleware\logging.middleware.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\middleware\logging.middleware.js
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\middleware\permissions.middleware.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\middleware\permissions.middleware.js
 // src/middleware/permissions.middleware.js
 const { sendError } = require('../utils/response.util');
 
@@ -6888,7 +7470,7 @@ module.exports = {
   requireAuthAndRole,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\middleware\rbac.middleware.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\middleware\rbac.middleware.js
 // src/middleware/rbac.middleware.js (FIXED - Stable Employee Lookup)
 const { Employee } = require('../models');
 const { sendError } = require('../utils/response.util');
@@ -7149,7 +7731,7 @@ module.exports = {
   ROLES,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\middleware\tenantIsolation.middleware.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\middleware\tenantIsolation.middleware.js
 // src/middleware/tenantIsolation.middleware.js
 /**
  * Tenant Isolation Middleware
@@ -7308,7 +7890,7 @@ module.exports = {
   validateBulkTenantOwnership,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\middleware\validation.middleware.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\middleware\validation.middleware.js
 // src/middleware/validation.middleware.js
 const { body, param, query, validationResult } = require('express-validator');
 const { sendError } = require('../utils/response.util');
@@ -7515,7 +8097,7 @@ module.exports = {
 //   [Folder] models
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\Attendance.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\Attendance.js
 // src/models/Attendance.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -7655,7 +8237,7 @@ module.exports = Attendance;
 
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\Company.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\Company.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 
@@ -7723,7 +8305,7 @@ const Company = sequelize.define('Company', {
 
 module.exports = Company;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\Contract.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\Contract.js
 // src/models/Contract.js (UPDATED WITH KM LIMITS & OVERAGE)
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -7940,7 +8522,7 @@ const Contract = sequelize.define('Contract', {
 
 module.exports = Contract;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\Customer.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\Customer.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 
@@ -8051,7 +8633,7 @@ const Customer = sequelize.define('Customer', {
 
 module.exports = Customer;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\Employee.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\Employee.js
 // src/models/Employee.js (ENHANCED VERSION)
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -8199,7 +8781,7 @@ const Employee = sequelize.define('Employee', {
 
 module.exports = Employee;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\index.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\index.js
 // src/models/index.js (UPDATED WITH NOTIFICATION)
 const { sequelize } = require('../config/database');
 
@@ -8330,7 +8912,7 @@ module.exports = {
   Payroll,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\Notification.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\Notification.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 const Notification = sequelize.define('Notification', {
@@ -8429,7 +9011,7 @@ const Notification = sequelize.define('Notification', {
 });
 module.exports = Notification;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\Payment.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\Payment.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 
@@ -8518,7 +9100,7 @@ const Payment = sequelize.define('Payment', {
 
 module.exports = Payment;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\Payroll.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\Payroll.js
 // src/models/Payroll.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -8814,7 +9396,7 @@ module.exports = {
   LeaveBalance,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\User.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\User.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
 const bcrypt = require('bcryptjs');
@@ -8907,7 +9489,7 @@ const User = sequelize.define('User', {
 
 module.exports = User;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\Vehicle.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\Vehicle.js
 // src/models/Vehicle.js - Compatible with your existing index.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -9084,7 +9666,7 @@ const Vehicle = sequelize.define('Vehicle', {
 
 module.exports = Vehicle;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\models\VehicleCost.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\models\VehicleCost.js
 // src/models/VehicleCost.js - Compatible with your existing index.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -9155,10 +9737,42 @@ module.exports = VehicleCost;
 //   [Folder] routes
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\admin.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\admin.routes.js
+const express = require('express');
+const router = express.Router();
 
+const adminController = require('../controllers/admin.controller');
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\analytics.routes.js
+// ============================================
+// Platform Stats
+// ============================================
+router.get('/stats', adminController.getPlatformStats);
+
+// ============================================
+// Companies
+// ============================================
+router.get('/companies', adminController.getAllCompanies);
+router.get('/companies/:id', adminController.getCompanyById);
+router.put('/companies/:id/subscription', adminController.updateSubscription);
+router.put('/companies/:id/suspend', adminController.suspendCompany);
+router.put('/companies/:id/reactivate', adminController.reactivateCompany);
+
+// ============================================
+// Users
+// ============================================
+router.get('/users', adminController.getAllUsers);
+
+// ============================================
+// Analytics
+// ============================================
+router.get('/analytics/growth', adminController.getGrowthAnalytics);
+router.get('/analytics/revenue-by-plan', adminController.getRevenueByPlan);
+router.get('/analytics/feature-usage', adminController.getFeatureUsage);
+router.get('/analytics/trending-vehicles', adminController.getTrendingVehicles);
+
+module.exports = router;
+
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\analytics.routes.js
 // src/routes/analytics.routes.js
 const express = require('express');
 const router = express.Router();
@@ -9315,7 +9929,7 @@ router.get(
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\attendance.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\attendance.routes.js
 // src/routes/attendance.routes.js
 const express = require('express');
 const router = express.Router();
@@ -9413,7 +10027,7 @@ router.post('/mark', requireRole(['owner', 'admin', 'manager', 'receptionist']),
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\auth.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\auth.routes.js
 // src/routes/auth.routes.js
 const express = require('express');
 const router = express.Router();
@@ -9437,7 +10051,7 @@ router.post('/logout', authenticateToken, logout); // Logout after auth
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\company.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\company.routes.js
 // src/routes/company.routes.js
 const express = require('express');
 const router = express.Router();
@@ -9449,7 +10063,7 @@ router.post('/', createCompany);
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\companyProfile.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\companyProfile.routes.js
 const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth.middleware'); // Your auth middleware
@@ -9476,7 +10090,7 @@ router.put('/settings', updateSettings);
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\contract.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\contract.routes.js
 // src/routes/contract.routes.js - UNIFIED VERSION
 const express = require('express');
 const router = express.Router();
@@ -9628,7 +10242,7 @@ router.post(
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\customer.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\customer.routes.js
 // src/routes/customer.routes.js - WITH TIER INFO
 const express = require('express');
 const router = express.Router();
@@ -9685,7 +10299,7 @@ router.delete('/:id', requireRole(['owner', 'admin']), deleteCustomer);
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\employee.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\employee.routes.js
 // src/routes/employee.routes.js
 const express = require('express');
 const router = express.Router();
@@ -9802,7 +10416,7 @@ router.post('/:id/reset-password', requireRole(['owner', 'admin']), resetEmploye
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\notifications.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\notifications.routes.js
 const express = require('express');
 const router = express.Router();
 const { Notification, sequelize } = require('../models');
@@ -9928,7 +10542,7 @@ router.patch('/:id/restore', async (req, res) => {
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\payment.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\payment.routes.js
 // src/routes/payment.routes.js
 const express = require('express');
 const router = express.Router();
@@ -9978,7 +10592,7 @@ router.put('/:id', requireRole(['owner', 'admin', 'manager']), updatePayment);
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\payroll.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\payroll.routes.js
 // src/routes/payroll.routes.js
 const express = require('express');
 const router = express.Router();
@@ -10055,7 +10669,7 @@ router.put('/:id/pay', requireRole(['owner', 'admin', 'accountant']), markAsPaid
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\reports.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\reports.routes.js
 // src/routes/reports.routes.js
 const express = require('express');
 const router = express.Router();
@@ -10140,7 +10754,7 @@ router.get(
 
 module.exports = router;
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\routes\vehicle.routes.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\routes\vehicle.routes.js
 // src/routes/vehicle.routes.js - FIXED
 const express = require('express');
 const router = express.Router();
@@ -10227,7 +10841,7 @@ module.exports = router;
 //   [Folder] services
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\services\analytics.service.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\services\analytics.service.js
 // src/services/analytics.service.js
 const { Contract, Payment, Vehicle, Customer, VehicleCost, sequelize } = require('../models');
 const { Op } = require('sequelize');
@@ -10761,7 +11375,7 @@ module.exports = {
   getDashboardKPIs,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\services\companySettings.service.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\services\companySettings.service.js
 // src/services/companySettings.service.js
 const { Company } = require('../models');
 
@@ -10834,7 +11448,7 @@ module.exports = {
   getRentalPolicySettings,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\services\customerTier.service.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\services\customerTier.service.js
 // src/services/customerTier.service.js
 /**
  * Customer Tier System for Loyalty-Based Pricing
@@ -11083,7 +11697,7 @@ module.exports = {
   getCustomerTierInfo,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\services\email.service.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\services\email.service.js
 // src/services/email.service.js
 const nodemailer = require('nodemailer');
 require('dotenv').config();
@@ -11329,10 +11943,10 @@ module.exports = {
   verifyEmailConfig,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\services\pdf.service.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\services\pdf.service.js
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\services\reportGeneration.service.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\services\reportGeneration.service.js
 // src/services/reportGeneration.service.js
 const { Contract, Payment, Vehicle, Customer, VehicleCost, sequelize } = require('../models');
 const { Op } = require('sequelize');
@@ -11704,14 +12318,14 @@ module.exports = {
   generateCustomerReport,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\services\storage.service.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\services\storage.service.js
 
 
 
 //   [Folder] utils
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\utils\bcrypt.util.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\utils\bcrypt.util.js
 // src/utils/bcrypt.util.js
 const bcrypt = require('bcryptjs');
 
@@ -11748,7 +12362,7 @@ module.exports = {
   comparePassword,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\utils\chartGenerator.util.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\utils\chartGenerator.util.js
 // src/utils/chartGenerator.util.js
 const { Chart } = require('chart.js/auto');
 const { createCanvas } = require('canvas');
@@ -12276,7 +12890,7 @@ module.exports = {
   generateBookingPatternsChart,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\utils\jwt.util.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\utils\jwt.util.js
 // src/utils/jwt.util.js
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
@@ -12343,7 +12957,7 @@ module.exports = {
   generateTokens,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\utils\pdfGenerator.util.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\utils\pdfGenerator.util.js
 // src/utils/pdfGenerator.util.js
 const puppeteer = require('puppeteer');
 const { generateChartsForReport } = require('./chartGenerator.util');
@@ -12782,7 +13396,7 @@ module.exports = {
   generateReportPDF,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\utils\response.util.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\utils\response.util.js
 // src/utils/response.util.js
 
 /**
@@ -12841,11 +13455,11 @@ module.exports = {
   sendValidationError,
 };
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\utils\validators.util.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\utils\validators.util.js
 
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\src\app.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\src\app.js
 // src/app.js (UPDATED WITH ALL NEW ROUTES)
 const express = require('express');
 const cors = require('cors');
@@ -12867,6 +13481,7 @@ const reportsRoutes = require('./routes/reports.routes');
 const notificationsRoutes = require('./routes/notifications.routes');
 const attendanceRoutes = require('./routes/attendance.routes');
 const payrollRoutes = require('./routes/payroll.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 
@@ -12942,6 +13557,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/payroll', payrollRoutes);
+app.use('/api/admin', adminRoutes);
 
 // ============================================
 // ERROR HANDLERS
@@ -12975,17 +13591,54 @@ module.exports = app;
 // [Folder] tests
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\tests\analytics.test.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\tests\analytics.test.js
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\tests\auth.test.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\tests\auth.test.js
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\tests\vehicles.test.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\tests\vehicles.test.js
 
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\package.json
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\check-enum.js
+const { Sequelize } = require('sequelize');
+
+const DATABASE_URL = process.env.DATABASE_URL;
+
+const sequelize = new Sequelize(DATABASE_URL, {
+  dialect: 'postgres',
+  dialectOptions: {
+    ssl: {
+      require: true,
+      rejectUnauthorized: false
+    }
+  },
+  logging: false,
+});
+
+async function checkEnum() {
+  try {
+    await sequelize.authenticate();
+    console.log('✅ Connected');
+    
+    const [result] = await sequelize.query(`
+  SELECT unnest(enum_range(NULL::enum_employees_role)) AS role_value;
+`);
+    
+    console.log('Valid role values in database:');
+    result.forEach(r => console.log('  -', r.role_value));
+    
+  } catch (error) {
+    console.error('Error:', error.message);
+  } finally {
+    await sequelize.close();
+  }
+}
+
+checkEnum();
+
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\package.json
 {
   "name": "car-rental-backend",
   "version": "1.0.0",
@@ -12995,7 +13648,9 @@ module.exports = app;
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "build": "npm install",
+    "init-db": "node scripts/init-db.js"
   },
   "keywords": [],
   "author": "",
@@ -13031,7 +13686,453 @@ module.exports = app;
 }
 
 
-// C:\Users\kebic\OneDrive\Desktop\car-rental-rahim\car-rental-rahim\car-rental-backend\server.js
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\seed-demo-data.js
+// seed-demo-data.js - Clear ALL data and reseed from scratch
+const { Sequelize } = require('sequelize');
+const bcrypt = require('bcryptjs');
+
+const DATABASE_URL = process.env.DATABASE_URL;
+
+const sequelize = new Sequelize(DATABASE_URL, {
+  dialect: 'postgres',
+  dialectOptions: {
+    ssl: {
+      require: true,
+      rejectUnauthorized: false
+    }
+  },
+  logging: false,
+});
+
+// Helper functions
+const randomDate = (start, end) => {
+  return new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
+};
+
+const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+const randomElement = (array) => array[Math.floor(Math.random() * array.length)];
+
+async function resetAndSeed() {
+  try {
+    console.log('🌱 Starting database reset and seeding...');
+    await sequelize.authenticate();
+    console.log('✅ Database connected');
+
+    // Get demo company
+    const companies = await sequelize.query(`
+      SELECT id FROM companies WHERE email = 'demo@example.com' LIMIT 1
+    `, { type: sequelize.QueryTypes.SELECT });
+
+    if (!companies || companies.length === 0) {
+      console.error('❌ Demo company not found. Run init-db.js first!');
+      process.exit(1);
+    }
+
+    const companyId = companies[0].id;
+    console.log(`✅ Found demo company: ${companyId}`);
+
+    // Get demo user
+    const users = await sequelize.query(`
+      SELECT id FROM users WHERE email = 'demo@demo.com' LIMIT 1
+    `, { type: sequelize.QueryTypes.SELECT });
+    const userId = users[0].id;
+
+    // ============================================
+    // STEP 1: DELETE ALL OLD SEED DATA
+    // ============================================
+    console.log('\n🗑️  CLEARING OLD DATA...');
+    
+    // Delete in correct order (foreign key constraints)
+    await sequelize.query(`DELETE FROM notifications WHERE company_id = :companyId`, { replacements: { companyId } });
+    console.log('   ✅ Cleared notifications');
+    
+    await sequelize.query(`DELETE FROM vehicle_costs WHERE vehicle_id IN (SELECT id FROM vehicles WHERE company_id = :companyId)`, { replacements: { companyId } });
+    console.log('   ✅ Cleared vehicle costs');
+    
+    await sequelize.query(`DELETE FROM payments WHERE company_id = :companyId`, { replacements: { companyId } });
+    console.log('   ✅ Cleared payments');
+    
+    await sequelize.query(`DELETE FROM contracts WHERE company_id = :companyId`, { replacements: { companyId } });
+    console.log('   ✅ Cleared contracts');
+    
+    await sequelize.query(`DELETE FROM customers WHERE company_id = :companyId`, { replacements: { companyId } });
+    console.log('   ✅ Cleared customers');
+    
+    await sequelize.query(`DELETE FROM vehicles WHERE company_id = :companyId`, { replacements: { companyId } });
+    console.log('   ✅ Cleared vehicles');
+    
+    await sequelize.query(`DELETE FROM employees WHERE company_id = :companyId`, { replacements: { companyId } });
+    console.log('   ✅ Cleared employees');
+    
+    // Delete employee user accounts (NOT the main demo@demo.com user)
+    await sequelize.query(`DELETE FROM users WHERE company_id = :companyId AND email != 'demo@demo.com'`, { replacements: { companyId } });
+    console.log('   ✅ Cleared employee users');
+
+    console.log('\n✅ OLD DATA CLEARED!\n');
+
+    // ============================================
+    // STEP 2: CREATE NEW SEED DATA
+    // ============================================
+    
+    // 1. CREATE EMPLOYEES
+    console.log('👥 Creating employees...');
+    
+    const employeeRoles = [
+      {
+        name: 'Sarah Manager',
+        email: 'sarah@demo.com',
+        userRole: 'manager',          // users.role
+        employeeRole: 'manager',      // employees.role
+        position: 'Fleet Manager',
+        department: 'fleet'
+      },
+      {
+        name: 'John Sales',
+        email: 'john@demo.com',
+        userRole: 'staff',
+        employeeRole: 'sales_agent',
+        position: 'Sales Agent',
+        department: 'sales'
+      },
+      {
+        name: 'Emily Reception',
+        email: 'emily@demo.com',
+        userRole: 'staff',
+        employeeRole: 'receptionist',
+        position: 'Receptionist',
+        department: 'customer_service'
+      },
+      {
+        name: 'Mike Fleet',
+        email: 'mike@demo.com',
+        userRole: 'staff',
+        employeeRole: 'fleet_coordinator',
+        position: 'Fleet Coordinator',
+        department: 'fleet'
+      },
+      {
+        name: 'Lisa Accountant',
+        email: 'lisa@demo.com',
+        userRole: 'admin',
+        employeeRole: 'accountant',
+        position: 'Senior Accountant',
+        department: 'finance'
+      },
+    ];
+
+    const employeeIds = [];
+
+    for (const emp of employeeRoles) {
+      const passwordHash = await bcrypt.hash('password123', 10);
+      
+      const userResult = await sequelize.query(`
+        INSERT INTO users (id, company_id, full_name, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES (gen_random_uuid(), :companyId, :name, :email, :passwordHash, :userRole, true, NOW(), NOW())
+        RETURNING id
+      `, {
+        replacements: { companyId, name: emp.name, email: emp.email, passwordHash, userRole: emp.userRole },
+        type: sequelize.QueryTypes.INSERT
+      });
+
+      const empUserId = userResult[0][0].id;
+
+      const empResult = await sequelize.query(`
+        INSERT INTO employees (
+          id, company_id, user_id, full_name, email, phone, position, department, role,
+          salary_type, salary, hire_date, status, created_at, updated_at
+        )
+        VALUES (
+          gen_random_uuid(), :companyId, :userId, :name, :email, :phone, :position, :department, :employeeRole,
+          'monthly', :salary, :hireDate, 'active', NOW(), NOW()
+        )
+        RETURNING id
+      `, {
+        replacements: {
+          companyId,
+          userId: empUserId,
+          name: emp.name,
+          email: emp.email,
+          phone: `+213 ${randomInt(500, 799)} ${randomInt(100, 999)} ${randomInt(100, 999)}`,
+          position: emp.position,
+          department: emp.department,
+          employeeRole: emp.employeeRole,
+          salary: randomInt(40000, 80000),
+          hireDate: randomDate(new Date(2023, 0, 1), new Date(2024, 11, 31))
+        },
+        type: sequelize.QueryTypes.INSERT
+      });
+
+      employeeIds.push(empResult[0][0].id);
+    }
+
+    console.log(`✅ Created ${employeeIds.length} employees`);
+
+    // 2. CREATE VEHICLES
+    console.log('🚗 Creating vehicles...');
+    
+    const vehicleData = [
+      { brand: 'Toyota', model: 'Corolla', year: 2023, dailyRate: 4500 },
+      { brand: 'Toyota', model: 'Yaris', year: 2024, dailyRate: 3500 },
+      { brand: 'Hyundai', model: 'i20', year: 2023, dailyRate: 3200 },
+      { brand: 'Renault', model: 'Clio', year: 2024, dailyRate: 3000 },
+      { brand: 'Peugeot', model: '208', year: 2023, dailyRate: 3200 },
+      { brand: 'Toyota', model: 'Hilux', year: 2024, dailyRate: 8500 },
+      { brand: 'Hyundai', model: 'Tucson', year: 2023, dailyRate: 6500 },
+      { brand: 'Kia', model: 'Sportage', year: 2024, dailyRate: 6800 },
+      { brand: 'Nissan', model: 'Qashqai', year: 2023, dailyRate: 6000 },
+      { brand: 'Ford', model: 'EcoSport', year: 2023, dailyRate: 5500 },
+      { brand: 'Mercedes', model: 'C-Class', year: 2024, dailyRate: 12000 },
+      { brand: 'BMW', model: '3 Series', year: 2023, dailyRate: 11500 },
+      { brand: 'Audi', model: 'A4', year: 2024, dailyRate: 11000 },
+      { brand: 'Volkswagen', model: 'Passat', year: 2023, dailyRate: 5500 },
+      { brand: 'Seat', model: 'Ibiza', year: 2024, dailyRate: 2800 },
+    ];
+
+    const vehicleIds = [];
+    const statuses = ['available', 'available', 'available', 'rented', 'available', 'rented', 'available', 'maintenance'];
+
+    for (const v of vehicleData) {
+      const regNumber = `${randomInt(10, 99)}-${randomInt(100, 999)}-${randomInt(10, 99)}`;
+      const status = randomElement(statuses);
+      const mileage = randomInt(5000, 80000);
+      const lastMaintenance = mileage - randomInt(1000, 4500);
+      
+      const result = await sequelize.query(`
+        INSERT INTO vehicles (
+          id, company_id, brand, model, year, registration_number, color, transmission,
+          fuel_type, seats, daily_rate, status, mileage, last_maintenance_mileage,
+          next_maintenance_mileage, maintenance_interval_km, maintenance_alert_threshold,
+          last_maintenance_alert_mileage, purchase_price, purchase_date, created_at, updated_at
+        )
+        VALUES (
+          gen_random_uuid(), :companyId, :brand, :model, :year, :regNumber, :color, :transmission,
+          :fuelType, 5, :dailyRate, :status, :mileage, :lastMaintenance,
+          :nextMaintenance, 5000, 100, :lastMaintenance, :purchasePrice, :purchaseDate, NOW(), NOW()
+        )
+        RETURNING id
+      `, {
+        replacements: {
+          companyId,
+          brand: v.brand,
+          model: v.model,
+          year: v.year,
+          regNumber,
+          color: randomElement(['White', 'Black', 'Silver', 'Blue', 'Red', 'Gray']),
+          transmission: randomElement(['automatic', 'manual']),
+          fuelType: randomElement(['diesel', 'petrol']),
+          dailyRate: v.dailyRate,
+          status,
+          mileage,
+          lastMaintenance,
+          nextMaintenance: lastMaintenance + 5000,
+          purchasePrice: v.dailyRate * 365 * 2,
+          purchaseDate: randomDate(new Date(2022, 0, 1), new Date(2023, 11, 31))
+        },
+        type: sequelize.QueryTypes.INSERT
+      });
+
+      vehicleIds.push(result[0][0].id);
+    }
+
+    console.log(`✅ Created ${vehicleIds.length} vehicles`);
+
+    // 3. CREATE CUSTOMERS
+    console.log('👤 Creating customers...');
+    
+    const firstNames = ['Ahmed', 'Fatima', 'Mohamed', 'Amina', 'Youssef', 'Samira', 'Karim', 'Leila', 'Omar', 'Nadia'];
+    const lastNames = ['Benali', 'Bouazza', 'Cherif', 'Djelloul', 'Farid', 'Gharbi', 'Hamdi', 'Ibrahim', 'Khelifa', 'Larbi'];
+    
+    const customerIds = [];
+
+    for (let i = 0; i < 20; i++) {
+      const fullName = `${randomElement(firstNames)} ${randomElement(lastNames)}`;
+      const email = fullName.toLowerCase().replace(/\s+/g, '.') + '@example.dz';
+      const totalRentals = randomInt(0, 25);
+      const lifetimeValue = totalRentals * randomInt(5000, 15000);
+
+      const result = await sequelize.query(`
+        INSERT INTO customers (
+          id, company_id, customer_type, full_name, email, phone, address, city,
+          drivers_license_number, total_rentals, lifetime_value, is_blacklisted,
+          apply_tier_discount, created_at, updated_at
+        )
+        VALUES (
+          gen_random_uuid(), :companyId, 'individual', :fullName, :email, :phone, :address, :city,
+          :licenseNumber, :totalRentals, :lifetimeValue, false, true, :createdAt, NOW()
+        )
+        RETURNING id
+      `, {
+        replacements: {
+          companyId,
+          fullName,
+          email,
+          phone: `+213 ${randomInt(500, 799)} ${randomInt(100, 999)} ${randomInt(100, 999)}`,
+          address: `${randomInt(1, 999)} Rue de la Liberté`,
+          city: randomElement(['Algiers', 'Oran', 'Constantine', 'Annaba', 'Blida']),
+          licenseNumber: `DL${randomInt(100000, 999999)}`,
+          totalRentals,
+          lifetimeValue,
+          createdAt: randomDate(new Date(2023, 0, 1), new Date(2025, 11, 31))
+        },
+        type: sequelize.QueryTypes.INSERT
+      });
+
+      customerIds.push(result[0][0].id);
+    }
+
+    console.log(`✅ Created ${customerIds.length} customers`);
+
+    // 4. CREATE CONTRACTS
+    console.log('📄 Creating contracts...');
+    
+    for (let i = 0; i < 30; i++) {
+      const vehicleId = randomElement(vehicleIds);
+      const customerId = randomElement(customerIds);
+      const status = randomElement(['active', 'completed', 'completed', 'completed']);
+      const contractNumber = `RENT-2026-${String(i + 1).padStart(4, '0')}`;
+      
+      const startDate = randomDate(new Date(2026, 0, 1), new Date(2026, 1, 10));
+      const totalDays = randomInt(3, 14);
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + totalDays);
+      
+      const dailyRate = randomInt(3000, 12000);
+      const baseAmount = dailyRate * totalDays;
+      const totalAmount = baseAmount * 1.19;
+      
+      const startMileage = randomInt(10000, 80000);
+      let endMileage = null;
+      let actualKmDriven = 0;
+
+      if (status === 'completed') {
+        actualKmDriven = randomInt(totalDays * 200, totalDays * 400);
+        endMileage = startMileage + actualKmDriven;
+      }
+
+      await sequelize.query(`
+        INSERT INTO contracts (
+          id, contract_number, company_id, customer_id, vehicle_id, created_by,
+          start_date, end_date, daily_rate, total_days, base_amount, total_amount,
+          start_mileage, end_mileage, actual_km_driven, daily_km_limit, status,
+          deposit_amount, deposit_returned, created_at, updated_at
+        )
+        VALUES (
+          gen_random_uuid(), :contractNumber, :companyId, :customerId, :vehicleId, :userId,
+          :startDate, :endDate, :dailyRate, :totalDays, :baseAmount, :totalAmount,
+          :startMileage, :endMileage, :actualKmDriven, 300, :status,
+          :depositAmount, :depositReturned, NOW(), NOW()
+        )
+      `, {
+        replacements: {
+          contractNumber,
+          companyId,
+          customerId,
+          vehicleId,
+          userId,
+          startDate,
+          endDate,
+          dailyRate,
+          totalDays,
+          baseAmount,
+          totalAmount,
+          startMileage,
+          endMileage,
+          actualKmDriven,
+          status,
+          depositAmount: dailyRate * 2,
+          depositReturned: status === 'completed'
+        }
+      });
+    }
+
+    console.log(`✅ Created 30 contracts`);
+
+    // 5. CREATE NOTIFICATIONS
+    console.log('🔔 Creating notifications...');
+    
+    const notifications = [
+      {
+        type: 'vehicle_maintenance',
+        priority: 'high',
+        title: '⚠️ Maintenance Due',
+        message: 'Toyota Hilux requires maintenance at 78,500 km'
+      },
+      {
+        type: 'km_limit_warning',
+        priority: 'medium',
+        title: '⚠️ KM Limit Warning',
+        message: 'Contract RENT-2026-0015: Vehicle has 250km remaining'
+      },
+      {
+        type: 'payment_due',
+        priority: 'high',
+        title: '💰 Payment Pending',
+        message: 'Outstanding payment of 12,500 DA for Contract RENT-2026-0020'
+      }
+    ];
+
+    for (const notif of notifications) {
+      await sequelize.query(`
+        INSERT INTO notifications (
+          id, company_id, type, priority, title, message, is_read, created_at, updated_at
+        )
+        VALUES (
+          gen_random_uuid(), :companyId, :type, :priority, :title, :message, false, NOW(), NOW()
+        )
+      `, {
+        replacements: {
+          companyId,
+          type: notif.type,
+          priority: notif.priority,
+          title: notif.title,
+          message: notif.message
+        }
+      });
+    }
+
+    console.log(`✅ Created ${notifications.length} notifications`);
+
+    // ============================================
+    // SUMMARY
+    // ============================================
+    console.log('\n✅ DATABASE RESET AND SEEDING COMPLETED!\n');
+    console.log('📊 Summary:');
+    console.log(`   - Employees: ${employeeIds.length}`);
+    console.log(`   - Vehicles: ${vehicleIds.length}`);
+    console.log(`   - Customers: ${customerIds.length}`);
+    console.log(`   - Contracts: 30`);
+    console.log(`   - Notifications: ${notifications.length}`);
+    console.log('\n🎉 Your demo database is ready!');
+    console.log('\n🔑 Login credentials:');
+    console.log('   Email: demo@demo.com');
+    console.log('   Password: demo123');
+    console.log('\n📝 Employee accounts:');
+    console.log('   - sarah@demo.com / password123 (Manager)');
+    console.log('   - john@demo.com / password123 (Sales Agent)');
+    console.log('   - emily@demo.com / password123 (Receptionist)');
+    console.log('   - mike@demo.com / password123 (Fleet Coordinator)');
+    console.log('   - lisa@demo.com / password123 (Accountant)');
+
+  } catch (error) {
+    console.error('❌ Error:', error.message);
+    throw error;
+  } finally {
+    await sequelize.close();
+  }
+}
+
+resetAndSeed()
+  .then(() => {
+    console.log('\n👋 Complete!');
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error('💥 Fatal error:', error);
+    process.exit(1);
+  });
+
+// C:\Users\kebic\OneDrive\Documents\car-rental-rahim\car-rental-backend\server.js
 // server.js (UPDATED)
 const app = require('./src/app');
 const { sequelize, testConnection } = require('./src/config/database');
@@ -13047,9 +14148,9 @@ const startServer = async () => {
     await testConnection();
     console.log('✅ Database connected');
 
-    // 2. Sync database (optional - remove in production)
+    // IMPORTANT: Only sync in development, NEVER in production
     if (process.env.NODE_ENV === 'development') {
-      await sequelize.sync({ alter: false }); // Set to true only when needed
+      await sequelize.sync({ alter: false });
       console.log('✅ Database synced');
     }
 

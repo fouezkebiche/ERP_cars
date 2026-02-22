@@ -19,6 +19,7 @@ const reportsRoutes = require('./routes/reports.routes');
 const notificationsRoutes = require('./routes/notifications.routes');
 const attendanceRoutes = require('./routes/attendance.routes');
 const payrollRoutes = require('./routes/payroll.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 
@@ -94,6 +95,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/payroll', payrollRoutes);
+app.use('/api/admin', adminRoutes);
 
 // ============================================
 // ERROR HANDLERS
