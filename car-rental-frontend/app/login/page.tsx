@@ -17,36 +17,23 @@ export default function LoginPage() {
   const router = useRouter()
   const { login, user, loading } = useAuth()
 
-  /**
-   * ✅ Prevent auto-logout / redirect loop
-   * Only redirect AFTER auth loading is finished
-   */
   useEffect(() => {
-    console.log("🔍 Login page auth check:", { user: !!user, loading })
-
     if (loading) return
-
-    if (user) {
-      console.log("✅ User already authenticated, redirecting to /dashboard")
-      router.push("/dashboard")
-    }
+    if (!user) return
+    // ✅ "owner" = platform superadmin → /admin
+    // everyone else = client company user → /dashboard
+    router.push(user.role === "owner" ? "/admin" : "/dashboard")
   }, [user, loading, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     e.stopPropagation()
-
-    console.log("🚀 Submit triggered from FORM! Payload:", { email, password })
     setError("")
     setLoadingSubmit(true)
-
     try {
-      console.log("📤 Calling AuthContext.login()...")
       await login(email, password)
-      console.log("✅ Login success (AuthContext handled tokens)")
-      // Redirect handled by useEffect
+      // redirect handled by AuthContext login() and the useEffect above
     } catch (err: any) {
-      console.error("💥 Login error:", err)
       setError(err?.message || "Login failed")
     } finally {
       setLoadingSubmit(false)
@@ -54,30 +41,21 @@ export default function LoginPage() {
   }
 
   const handleButtonClick = (e: React.MouseEvent) => {
-    console.log("🖱️ Button clicked directly!")
     handleSubmit(e as any)
   }
 
-  /**
-   * ✅ Show loading screen while auth state initializes
-   */
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-muted-foreground">Checking authentication...</p>
         </div>
       </div>
     )
   }
 
-  /**
-   * ✅ Prevent form flash when already logged in
-   */
-  if (user) {
-    return null
-  }
+  if (user) return null
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -115,9 +93,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           <div className="mb-8">
             <h2 className="text-3xl font-bold mb-2">Welcome Back</h2>
-            <p className="text-muted-foreground">
-              Sign in to your CarManager account
-            </p>
+            <p className="text-muted-foreground">Sign in to your CarManager account</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -168,9 +144,7 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-6 text-center">
-            <p className="text-muted-foreground mb-4">
-              Don't have an account?
-            </p>
+            <p className="text-muted-foreground mb-4">Don't have an account?</p>
             <Link href="/signup">
               <Button variant="outline" className="w-full bg-transparent">
                 Create Account

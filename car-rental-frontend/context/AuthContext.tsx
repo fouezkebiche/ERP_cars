@@ -1,4 +1,4 @@
-// context/AuthContext.tsx (FIXED - Stable Auth Edition)
+// context/AuthContext.tsx
 "use client"
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
@@ -36,6 +36,13 @@ interface RegisterData {
   role?: string
 }
 
+// ─── Single source of truth for redirect logic ────────────────────────────────
+// "owner" = YOU, the platform superadmin → /admin
+// everyone else (admin, manager, staff…) = client company user → /dashboard
+function getRedirectPath(role: string): string {
+  return role === 'owner' ? '/admin' : '/dashboard'
+}
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -44,7 +51,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [initializing, setInitializing] = useState(true)
   const router = useRouter()
 
-  // Role-based permissions mapping
   const rolePermissions: Record<string, string[]> = {
     owner: ['*'],
     admin: [
@@ -81,57 +87,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    // ✅ Only initialize once on mount
     let mounted = true
-    
     const init = async () => {
       if (!mounted) return
       await initializeAuth()
     }
-    
     init()
-    
-    return () => {
-      mounted = false
-    }
-  }, []) // ✅ Empty deps - only run once on mount
+    return () => { mounted = false }
+  }, [])
 
   const initializeAuth = async () => {
-    console.log('🔄 Initializing auth...')
-    
     const token = localStorage.getItem('accessToken')
     const storedUser = localStorage.getItem('user')
-    
-    console.log('💾 Has token:', !!token, '| Has stored user:', !!storedUser)
-    
-    if (token) {
-      console.log('🔑 Token preview:', token.substring(0, 30) + '...')
-    }
-    if (storedUser) {
-      try {
-        const parsed = JSON.parse(storedUser)
-        console.log('👤 Stored user:', parsed.email, '| Role:', parsed.role)
-      } catch (e) {
-        console.error('⚠️ Failed to parse stored user')
-      }
-    }
 
-    // If no token, immediately set not loading
     if (!token) {
-      console.log('❌ No token found, skipping auth')
       setLoading(false)
       setInitializing(false)
       return
     }
 
-    // Restore user from localStorage immediately (optimistic)
+    // Restore from localStorage immediately (optimistic)
     if (storedUser) {
       try {
-        const parsedUser = JSON.parse(storedUser)
-        setUser(parsedUser)
-        console.log('✅ Restored user from localStorage:', parsedUser.email)
-      } catch (e) {
-        console.warn('⚠️ Invalid stored user JSON')
+        setUser(JSON.parse(storedUser))
+      } catch {
         clearAuth()
         setLoading(false)
         setInitializing(false)
@@ -139,33 +118,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Verify token in background (non-blocking)
+    // Verify token in background
     try {
-      console.log('🔐 Verifying token with backend...')
       const response = await fetch(`${API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
 
-      console.log('🔐 Verify response status:', response.status)
-
       if (response.ok) {
         const data = await response.json()
         const freshUser = data.data.user
-        
-        // ✅ CRITICAL: Update BOTH state and localStorage with fresh data
         setUser(freshUser)
         localStorage.setItem('user', JSON.stringify(freshUser))
-        console.log('✅ Token valid, user synced:', freshUser.email, '| Role:', freshUser.role)
       } else if (response.status === 401) {
-        console.warn('⚠️ Token invalid (401), clearing auth')
         clearAuth()
         router.push('/login')
-      } else {
-        console.warn(`⚠️ Token verify returned ${response.status}, keeping session`)
       }
-    } catch (error) {
-      console.error('❌ Token verification network error:', error)
-      // Keep session on network error (offline tolerance)
+    } catch {
+      // Keep session on network error
     } finally {
       setLoading(false)
       setInitializing(false)
@@ -173,7 +142,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const clearAuth = () => {
-    console.log('🧹 Clearing auth data')
     localStorage.removeItem('accessToken')
     localStorage.removeItem('refreshToken')
     localStorage.removeItem('user')
@@ -183,7 +151,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     try {
       setLoading(true)
-      console.log('🔑 Login attempt:', email)
 
       const response = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
@@ -192,48 +159,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
 
       const data = await response.json()
-      console.log('🔑 Login response status:', response.status)
 
       if (!response.ok) {
         throw new Error(data.error || 'Login failed')
       }
 
-      // ✅ CRITICAL: Save tokens FIRST
-      const accessToken = data.data.accessToken
-      const refreshToken = data.data.refreshToken
-      
-      console.log('💾 Saving tokens to localStorage...')
-      localStorage.setItem('accessToken', accessToken)
-      localStorage.setItem('refreshToken', refreshToken)
-      
-      // ✅ Verify tokens were saved
-      const savedToken = localStorage.getItem('accessToken')
-      console.log('✅ Token saved and verified:', !!savedToken, savedToken?.substring(0, 30) + '...')
+      localStorage.setItem('accessToken', data.data.accessToken)
+      localStorage.setItem('refreshToken', data.data.refreshToken)
 
-      // ✅ CRITICAL: Save user with EXACT data from backend
       const newUser = data.data.user
-      console.log('👤 Setting user state:', newUser.email, '| Role:', newUser.role, '| ID:', newUser.id)
-      
       setUser(newUser)
       localStorage.setItem('user', JSON.stringify(newUser))
-      
-      // ✅ Verify user was saved
-      const savedUser = localStorage.getItem('user')
-      console.log('✅ User saved to localStorage:', !!savedUser)
-      
-      console.log('✅ Login successful:', newUser.full_name, '| Role:', newUser.role)
-      toast.success(`Welcome back, ${newUser.full_name}!`)
 
+      toast.success(`Welcome back, ${newUser.full_name}!`)
       setLoading(false)
-      
-      console.log('🔄 Redirecting to dashboard in 100ms...')
-      // ✅ Small delay to ensure state is updated
+
+      // ✅ Only "owner" goes to /admin — every other role goes to /dashboard
       setTimeout(() => {
-        router.push('/dashboard')
+        router.push(getRedirectPath(newUser.role))
       }, 100)
+
     } catch (error: any) {
       setLoading(false)
-      console.error('❌ Login error:', error)
       toast.error(error.message || 'Login failed')
       throw error
     }
@@ -243,7 +190,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true)
       const refreshTokenValue = localStorage.getItem('refreshToken')
-      
       if (refreshTokenValue) {
         await fetch(`${API_URL}/api/auth/logout`, {
           method: 'POST',
@@ -290,10 +236,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true)
       const refreshTokenValue = localStorage.getItem('refreshToken')
-      
-      if (!refreshTokenValue) {
-        throw new Error('No refresh token')
-      }
+
+      if (!refreshTokenValue) throw new Error('No refresh token')
 
       const response = await fetch(`${API_URL}/api/auth/refresh`, {
         method: 'POST',
@@ -302,15 +246,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
 
       const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error('Token refresh failed')
-      }
+      if (!response.ok) throw new Error('Token refresh failed')
 
       const newAccessToken = data.data.accessToken
       localStorage.setItem('accessToken', newAccessToken)
-      
-      // Re-verify user after refresh
+
       const meResponse = await fetch(`${API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${newAccessToken}` },
       })
@@ -322,7 +262,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('user', JSON.stringify(freshUser))
       }
     } catch (error) {
-      console.error('Token refresh error:', error)
       clearAuth()
       router.push('/login')
       throw error
@@ -349,19 +288,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading: loading || initializing,
-        login,
-        logout,
-        register,
-        refreshToken,
-        hasPermission,
-        hasAnyPermission,
-        hasRole,
-      }}
-    >
+    <AuthContext.Provider value={{
+      user,
+      loading: loading || initializing,
+      login,
+      logout,
+      register,
+      refreshToken,
+      hasPermission,
+      hasAnyPermission,
+      hasRole,
+    }}>
       {children}
     </AuthContext.Provider>
   )

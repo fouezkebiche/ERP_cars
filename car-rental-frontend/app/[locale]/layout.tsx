@@ -1,17 +1,30 @@
 import type React from "react";
 import { Analytics } from "@vercel/analytics/next";
-import "./globals.css";
-import { AuthProvider } from '@/context/AuthContext'
+import "../globals.css";
+import { AuthProvider } from '@/context/AuthContext';
 import { Toaster } from "react-hot-toast";
+import { NextIntlClientProvider } from 'next-intl';
+import { getMessages } from 'next-intl/server';
+import { notFound } from 'next/navigation';
 
+const locales = ['en', 'fr', 'ar'];
 
-
-
-export default function RootLayout({
+export default async function RootLayout({
   children,
-}: Readonly<{ children: React.ReactNode }>) {
+  params,
+}: {
+  children: React.ReactNode;
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+
+  if (!locales.includes(locale)) notFound();
+
+  const messages = await getMessages();
+  const isRTL = locale === 'ar';
+
   return (
-    <html lang="en">
+    <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'}>
       <head>
         <meta name="application-name" content="CarManager" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -22,14 +35,14 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/apple-icon.png" />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#10B981" />
-        <link rel="apple-touch-icon" href="/apple-icon.png" />
-
       </head>
       <body className="font-sans antialiased">
-        <AuthProvider>
-          {children}
-          <Toaster position="top-right" />
-        </AuthProvider>
+        <NextIntlClientProvider messages={messages}>
+          <AuthProvider>
+            {children}
+            <Toaster position={isRTL ? 'top-left' : 'top-right'} />
+          </AuthProvider>
+        </NextIntlClientProvider>
         <Analytics />
       </body>
     </html>

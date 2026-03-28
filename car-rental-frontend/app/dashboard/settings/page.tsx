@@ -2,26 +2,55 @@
 
 import type React from "react"
 import { useState, useEffect, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Save, Upload, Bell, X } from "lucide-react"
+import { Save, Upload, Bell, X, MapPin } from "lucide-react"
 import toast from "react-hot-toast"
 import { useNotifications } from "@/hooks/useNotifications"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
-interface Settings {
-  theme?: string;
-  notificationsEnabled?: boolean;
-  defaultDailyKmLimit?: number;
-  defaultOverageRate?: number;
-  [key: string]: any;
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface Wilaya {
+  id: string
+  code: string
+  name: string
+  ar_name: string
+  longitude: string
+  latitude: string
 }
 
+interface Commune {
+  id: string
+  post_code: string
+  name: string
+  wilaya_id: string
+  ar_name: string
+  longitude: string
+  latitude: string
+}
+
+interface Settings {
+  theme?: string
+  notificationsEnabled?: boolean
+  defaultDailyKmLimit?: number
+  defaultOverageRate?: number
+  wilaya?: string
+  wilaya_id?: string
+  commune?: string
+  commune_id?: string
+  [key: string]: any
+}
+
+// ─── Settings Page ────────────────────────────────────────────────────────────
 export default function SettingsPage() {
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState("company")
   const [isLoading, setIsLoading] = useState(false)
+
+  // ── Company profile form ──
   const [formData, setFormData] = useState({
     name: "",
     address: "",
@@ -30,12 +59,73 @@ export default function SettingsPage() {
     taxId: "",
     logoUrl: "",
   })
-  const [settingsData, setSettingsData] = useState<Settings>({})
-  const [token, setToken] = useState<string | null>(typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null)
 
-  const { data: notificationsData, dismissNotification } = useNotifications({ priority: 'critical', limit: 3, unread: true })
+  // ── Company settings (stored in company.settings JSON) ──
+  const [settingsData, setSettingsData] = useState<Settings>({})
+
+  const [token, setToken] = useState<string | null>(
+    typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
+  )
+
+  // ── Algeria geo data from /public ──
+  const [wilayas, setWilayas]     = useState<Wilaya[]>([])
+  const [communes, setCommunes]   = useState<Commune[]>([])
+  const [geoLoading, setGeoLoading] = useState(true)
+
+  // UI selections (may differ from what's saved until Save is clicked)
+  const [selectedWilayaId, setSelectedWilayaId] = useState("")
+
+  const { data: notificationsData, dismissNotification } = useNotifications({
+    priority: 'critical', limit: 3, unread: true,
+  })
   const criticalNotifications = notificationsData?.notifications || []
 
+  // ── Load wilaya + commune JSON from /public on mount ──────────────────────
+  useEffect(() => {
+    async function loadGeoData() {
+      try {
+        const [wRes, cRes] = await Promise.all([
+          fetch("/Wilaya_Of_Algeria.json"),
+          fetch("/Commune_Of_Algeria.json"),
+        ])
+        if (!wRes.ok || !cRes.ok) throw new Error("Could not load geo data files")
+        const [wData, cData]: [Wilaya[], Commune[]] = await Promise.all([
+          wRes.json(), cRes.json(),
+        ])
+        setWilayas(wData.sort((a, b) => parseInt(a.id) - parseInt(b.id)))
+        setCommunes(cData)
+      } catch (e) {
+        console.error("Failed to load Algeria geo data:", e)
+        toast.error("Could not load wilaya/commune data")
+      } finally {
+        setGeoLoading(false)
+      }
+    }
+    loadGeoData()
+  }, [])
+
+  // Communes for currently selected wilaya, sorted alphabetically
+  const availableCommunes: Commune[] = selectedWilayaId
+    ? communes
+        .filter(c => c.wilaya_id === selectedWilayaId)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : []
+
+  // ── Sync selectedWilayaId when settingsData loads ──
+  // (so dropdowns reflect the saved value)
+  useEffect(() => {
+    if (settingsData.wilaya_id) {
+      setSelectedWilayaId(settingsData.wilaya_id)
+    } else if (settingsData.wilaya && wilayas.length > 0) {
+      // Fallback: match by name if only name was saved
+      const found = wilayas.find(
+        w => w.name.toLowerCase() === settingsData.wilaya?.toLowerCase()
+      )
+      if (found) setSelectedWilayaId(found.id)
+    }
+  }, [settingsData.wilaya_id, settingsData.wilaya, wilayas])
+
+  // ── Fetch company profile ─────────────────────────────────────────────────
   const fetchProfile = useCallback(async () => {
     if (!token) return
     try {
@@ -55,24 +145,18 @@ export default function SettingsPage() {
         }
         throw new Error(`HTTP ${res.status}`)
       }
-      const responseData = await res.json()
-      const { data } = responseData
+      const { data } = await res.json()
       const { company } = data || {}
       if (!company) throw new Error('No company data in response')
-      
+
       setFormData({
-        name: company.name || '',
-        address: company.address || '',
-        phone: company.phone || '',
-        email: company.email || '',
-        taxId: company.tax_id || '',
+        name:    company.name     || '',
+        address: company.address  || '',
+        phone:   company.phone    || '',
+        email:   company.email    || '',
+        taxId:   company.tax_id   || '',
         logoUrl: company.logo_url || '',
       })
-      
-      // 🔍 DEBUG: Log what we received
-      console.log('📥 Fetched settings:', company.settings);
-      console.log('📥 defaultDailyKmLimit:', company.settings?.defaultDailyKmLimit, 'type:', typeof company.settings?.defaultDailyKmLimit);
-      
       setSettingsData(company.settings || {})
       toast.success("Profile loaded")
     } catch (error) {
@@ -91,39 +175,57 @@ export default function SettingsPage() {
     fetchProfile()
   }, [token, fetchProfile])
 
+  // ── Handlers ──────────────────────────────────────────────────────────────
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
+    setFormData(prev => ({ ...prev, [name]: value }))
   }
 
-  const handleSettingsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const input = e.target as HTMLInputElement | HTMLSelectElement;
-    const name = input.name;
-    
-    let value: any;
-    
+  const handleSettingsChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const input = e.target
+    const name  = input.name
+    let value: any
+
     if (input.type === 'checkbox') {
-      value = (input as HTMLInputElement).checked;
+      value = (input as HTMLInputElement).checked
     } else if (input.type === 'number') {
-      // Parse number properly
-      const numValue = parseFloat(input.value);
-      value = isNaN(numValue) ? 0 : numValue;
-      
-      // Round KM limit to integer
-      if (name === 'defaultDailyKmLimit') {
-        value = Math.round(value);
-      }
-      
-      // 🔍 DEBUG
-      console.log(`📝 Setting ${name} = ${value} (type: ${typeof value})`);
+      const n = parseFloat(input.value)
+      value = isNaN(n) ? 0 : (name === 'defaultDailyKmLimit' ? Math.round(n) : n)
     } else {
-      value = input.value;
+      value = input.value
     }
-    
-    setSettingsData((prev) => ({
+
+    setSettingsData(prev => ({ ...prev, [name]: value }))
+  }
+
+  // Called when wilaya dropdown changes
+  const handleWilayaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const wilayaId = e.target.value
+    const found    = wilayas.find(w => w.id === wilayaId) ?? null
+
+    setSelectedWilayaId(wilayaId)
+    // Reset commune when wilaya changes
+    setSettingsData(prev => ({
       ...prev,
-      [name]: value,
-    }));
+      wilaya_id: wilayaId,
+      wilaya:    found?.name ?? '',
+      commune_id: '',
+      commune:   '',
+    }))
+  }
+
+  // Called when commune dropdown changes
+  const handleCommuneChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const communeId = e.target.value
+    const found     = availableCommunes.find(c => c.id === communeId) ?? null
+
+    setSettingsData(prev => ({
+      ...prev,
+      commune_id: communeId,
+      commune:    found?.name ?? '',
+    }))
   }
 
   const handleSaveProfile = async () => {
@@ -132,23 +234,20 @@ export default function SettingsPage() {
       setIsLoading(true)
       const res = await fetch(`${API_URL}/api/company/profile`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: formData.name,
+          name:    formData.name,
           address: formData.address,
-          phone: formData.phone,
-          email: formData.email,
-          tax_id: formData.taxId,
+          phone:   formData.phone,
+          email:   formData.email,
+          tax_id:  formData.taxId,
           logo_url: formData.logoUrl,
         }),
       })
       if (!res.ok) {
-        const errorData = await res.json()
+        const err = await res.json()
         if (res.status === 422) {
-          toast.error(`Validation error: ${errorData.details?.[0]?.msg || 'Invalid input'}`)
+          toast.error(`Validation error: ${err.details?.[0]?.msg || 'Invalid input'}`)
           return
         }
         if (res.status === 401) {
@@ -171,28 +270,26 @@ export default function SettingsPage() {
 
   const handleSaveSettings = async () => {
     if (!token) return toast.error("No auth token")
-    
-    // 🔍 DEBUG: Log what we're about to save
-    console.log('💾 Saving settings:', settingsData);
-    console.log('💾 defaultDailyKmLimit:', settingsData.defaultDailyKmLimit, 'type:', typeof settingsData.defaultDailyKmLimit);
-    console.log('💾 defaultOverageRate:', settingsData.defaultOverageRate, 'type:', typeof settingsData.defaultOverageRate);
-    
+
+    // Warn if location hasn't been set yet
+    if (!settingsData.wilaya) {
+      toast("⚠️ Please select your wilaya so your data appears in platform reports.", {
+        icon: "📍",
+        duration: 4000,
+      })
+    }
+
     try {
       setIsLoading(true)
       const res = await fetch(`${API_URL}/api/company/settings`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ settings: settingsData }),
       })
-      
       if (!res.ok) {
-        const errorData = await res.json()
-        console.error('❌ Save failed:', errorData);
+        const err = await res.json()
         if (res.status === 422) {
-          toast.error(`Validation error: ${errorData.details?.[0]?.msg || 'Invalid settings'}`)
+          toast.error(`Validation error: ${err.details?.[0]?.msg || 'Invalid settings'}`)
           return
         }
         if (res.status === 401) {
@@ -203,12 +300,8 @@ export default function SettingsPage() {
         }
         throw new Error(`HTTP ${res.status}`)
       }
-      
-      const responseData = await res.json();
-      console.log('✅ Save response:', responseData);
-      
-      toast.success("Settings updated successfully")
-      fetchProfile() // Refetch to confirm
+      toast.success("Settings saved successfully")
+      fetchProfile()
     } catch (error) {
       console.error("Update settings error:", error)
       toast.error("Failed to update settings")
@@ -217,22 +310,19 @@ export default function SettingsPage() {
     }
   }
 
-  const handleDismissNotification = (id: string) => {
-    dismissNotification(id)
-  }
-
   const tabs = [
-    { id: "company", label: "Company Profile" },
-    { id: "settings", label: "Company Settings" },
-    { id: "billing", label: "Billing & Subscription" },
-    { id: "users", label: "Users & Permissions" },
-    { id: "templates", label: "Contract Templates" },
+    { id: "company",       label: "Company Profile" },
+    { id: "settings",      label: "Company Settings" },
+    { id: "billing",       label: "Billing & Subscription" },
     { id: "notifications", label: "Notifications" },
-    { id: "language", label: "Language & Regional" },
   ]
 
-  if (isLoading && activeTab === "company") {
-    return <div className="flex items-center justify-center h-64"><div>Loading...</div></div>
+  if (isLoading && activeTab === "company" && !formData.name) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div>Loading...</div>
+      </div>
+    )
   }
 
   return (
@@ -245,7 +335,7 @@ export default function SettingsPage() {
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-border pb-0">
-        {tabs.map((tab) => (
+        {tabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -262,6 +352,8 @@ export default function SettingsPage() {
 
       {/* Tab Content */}
       <div className="max-w-2xl">
+
+        {/* ── Company Profile tab ───────────────────────────────────────────── */}
         {activeTab === "company" && (
           <div className="space-y-6">
             <div>
@@ -273,7 +365,7 @@ export default function SettingsPage() {
                       src={formData.logoUrl}
                       alt="Logo"
                       className="w-full h-full object-cover rounded"
-                      onError={(e) => { e.currentTarget.src = '/placeholder.svg' }}
+                      onError={e => { e.currentTarget.src = '/placeholder.svg' }}
                     />
                   ) : (
                     <Upload className="w-6 h-6 text-muted-foreground" />
@@ -289,12 +381,14 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
+
             <div>
               <label htmlFor="name" className="block text-sm font-medium mb-2">
                 Company Name
               </label>
               <Input id="name" name="name" value={formData.name} onChange={handleChange} required />
             </div>
+
             <div>
               <label htmlFor="address" className="block text-sm font-medium mb-2">
                 Address
@@ -308,26 +402,23 @@ export default function SettingsPage() {
                 className="min-h-20"
               />
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="phone" className="block text-sm font-medium mb-2">
-                  Phone
-                </label>
+                <label htmlFor="phone" className="block text-sm font-medium mb-2">Phone</label>
                 <Input id="phone" name="phone" value={formData.phone} onChange={handleChange} />
               </div>
               <div>
-                <label htmlFor="email" className="block text-sm font-medium mb-2">
-                  Email
-                </label>
+                <label htmlFor="email" className="block text-sm font-medium mb-2">Email</label>
                 <Input id="email" name="email" type="email" value={formData.email} onChange={handleChange} required />
               </div>
             </div>
+
             <div>
-              <label htmlFor="taxId" className="block text-sm font-medium mb-2">
-                Tax ID
-              </label>
+              <label htmlFor="taxId" className="block text-sm font-medium mb-2">Tax ID</label>
               <Input id="taxId" name="taxId" value={formData.taxId} onChange={handleChange} />
             </div>
+
             <Button onClick={handleSaveProfile} disabled={isLoading} className="bg-primary hover:bg-primary/90">
               <Save className="w-4 h-4 mr-2" />
               {isLoading ? "Saving..." : "Save Changes"}
@@ -335,116 +426,198 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* ── Company Settings tab ──────────────────────────────────────────── */}
         {activeTab === "settings" && (
           <div className="space-y-6">
             <p className="text-muted-foreground">
               Customize company-wide settings and rental policies.
             </p>
-            
-            {/* 🔍 DEBUG PANEL - Remove this after debugging */}
-            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded text-xs">
-              <p className="font-bold mb-2">DEBUG INFO (remove later):</p>
-              <p>defaultDailyKmLimit: {settingsData.defaultDailyKmLimit} (type: {typeof settingsData.defaultDailyKmLimit})</p>
-              <p>defaultOverageRate: {settingsData.defaultOverageRate} (type: {typeof settingsData.defaultOverageRate})</p>
-            </div>
-            
-            <div className="space-y-6">
-              {/* Rental Policies Section */}
-              <div className="p-6 rounded-lg border border-border bg-card">
-                <h3 className="font-semibold mb-4 flex items-center gap-2">
-                  <span className="text-lg">🚗</span>
-                  Rental Policies
-                </h3>
-                <div className="space-y-4">
-                  <div>
-                    <label htmlFor="defaultDailyKmLimit" className="block text-sm font-medium mb-2">
-                      Default Daily KM Limit <span className="text-muted-foreground">(per day)</span>
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <Input
-                        id="defaultDailyKmLimit"
-                        name="defaultDailyKmLimit"
-                        type="number"
-                        min="50"
-                        max="1000"
-                        step="50"
-                        value={settingsData.defaultDailyKmLimit ?? 300}
-                        onChange={handleSettingsChange}
-                        className="w-32"
-                      />
-                      <span className="text-sm text-muted-foreground">km/day</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Applied to all new contracts. Customers can drive this many kilometers per day before overage charges apply.
-                    </p>
-                  </div>
-                  
-                  <div>
-                    <label htmlFor="defaultOverageRate" className="block text-sm font-medium mb-2">
-                      Default Overage Rate <span className="text-muted-foreground">(for new customers)</span>
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <Input
-                        id="defaultOverageRate"
-                        name="defaultOverageRate"
-                        type="number"
-                        min="5"
-                        max="50"
-                        step="1"
-                        value={settingsData.defaultOverageRate ?? 20}
-                        onChange={handleSettingsChange}
-                        className="w-32"
-                      />
-                      <span className="text-sm text-muted-foreground">DA/km</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Base charge per kilometer over the limit (before tier discounts).
-                    </p>
-                  </div>
+
+            {/* ── Location section ──────────────────────────────────────────── */}
+            <div className="p-6 rounded-lg border border-border bg-card">
+              <h3 className="font-semibold mb-1 flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-primary" />
+                Company Location
+              </h3>
+              <p className="text-xs text-muted-foreground mb-4">
+                📍 Please enter your wilaya and commune — this is used by the platform to
+                show your rental activity in regional reports and trending vehicle analytics.
+              </p>
+
+              {/* Location already set → show saved badge */}
+              {settingsData.wilaya && settingsData.commune && (
+                <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 w-fit">
+                  <MapPin className="w-3 h-3 text-primary" />
+                  <span className="text-xs font-medium text-primary">
+                    {settingsData.commune}, {settingsData.wilaya}
+                  </span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Wilaya */}
+                <div>
+                  <label htmlFor="wilayaSelect" className="block text-sm font-medium mb-2">
+                    Wilaya <span className="text-destructive">*</span>
+                  </label>
+                  <select
+                    id="wilayaSelect"
+                    value={selectedWilayaId}
+                    disabled={geoLoading}
+                    onChange={handleWilayaChange}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    style={{ opacity: geoLoading ? 0.5 : 1 }}
+                  >
+                    <option value="">
+                      {geoLoading ? "Loading wilayas…" : "— Select your wilaya —"}
+                    </option>
+                    {wilayas.map(w => (
+                      <option key={w.id} value={w.id}>
+                        {w.code.padStart(2, '0')} — {w.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Commune — only enabled after wilaya is chosen */}
+                <div>
+                  <label htmlFor="communeSelect" className="block text-sm font-medium mb-2">
+                    Commune <span className="text-destructive">*</span>
+                  </label>
+                  <select
+                    id="communeSelect"
+                    value={settingsData.commune_id || ''}
+                    disabled={!selectedWilayaId || geoLoading}
+                    onChange={handleCommuneChange}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <option value="">
+                      {!selectedWilayaId
+                        ? "Select a wilaya first"
+                        : `— All ${settingsData.wilaya || ''} communes —`}
+                    </option>
+                    {availableCommunes.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              {/* General Settings Section */}
-              <div className="p-6 rounded-lg border border-border bg-card">
-                <h3 className="font-semibold mb-4">General Settings</h3>
-                <div className="space-y-4">
-                  <div>
-                    <label htmlFor="theme" className="block text-sm font-medium mb-2">Theme</label>
-                    <select
-                      id="theme"
-                      name="theme"
-                      value={settingsData.theme || ''}
+              {/* Missing location warning */}
+              {!settingsData.wilaya && (
+                <p className="mt-3 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                  <span>⚠️</span>
+                  Your location is not set. Platform-wide reports won't include your data
+                  in location filters until you save a wilaya and commune.
+                </p>
+              )}
+            </div>
+
+            {/* ── Rental Policies section ───────────────────────────────────── */}
+            <div className="p-6 rounded-lg border border-border bg-card">
+              <h3 className="font-semibold mb-4 flex items-center gap-2">
+                <span className="text-lg">🚗</span>
+                Rental Policies
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="defaultDailyKmLimit" className="block text-sm font-medium mb-2">
+                    Default Daily KM Limit <span className="text-muted-foreground">(per day)</span>
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <Input
+                      id="defaultDailyKmLimit"
+                      name="defaultDailyKmLimit"
+                      type="number"
+                      min="50"
+                      max="1000"
+                      step="50"
+                      value={settingsData.defaultDailyKmLimit ?? 300}
                       onChange={handleSettingsChange}
-                      className="w-full px-3 py-2 border border-border rounded-md bg-background"
-                    >
-                      <option value="">Default</option>
-                      <option value="light">Light</option>
-                      <option value="dark">Dark</option>
-                    </select>
+                      className="w-32"
+                    />
+                    <span className="text-sm text-muted-foreground">km/day</span>
                   </div>
-                  <div>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        name="notificationsEnabled"
-                        checked={!!settingsData.notificationsEnabled}
-                        onChange={handleSettingsChange}
-                        className="rounded"
-                      />
-                      Enable Email Notifications
-                    </label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Applied to all new contracts. Customers can drive this many
+                    kilometers per day before overage charges apply.
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="defaultOverageRate" className="block text-sm font-medium mb-2">
+                    Default Overage Rate <span className="text-muted-foreground">(for new customers)</span>
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <Input
+                      id="defaultOverageRate"
+                      name="defaultOverageRate"
+                      type="number"
+                      min="5"
+                      max="50"
+                      step="1"
+                      value={settingsData.defaultOverageRate ?? 20}
+                      onChange={handleSettingsChange}
+                      className="w-32"
+                    />
+                    <span className="text-sm text-muted-foreground">DA/km</span>
                   </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Base charge per kilometer over the limit (before tier discounts).
+                  </p>
                 </div>
               </div>
             </div>
-            <Button onClick={handleSaveSettings} disabled={isLoading} className="bg-primary hover:bg-primary/90">
+
+            {/* ── General Settings section ──────────────────────────────────── */}
+            <div className="p-6 rounded-lg border border-border bg-card">
+              <h3 className="font-semibold mb-4">General Settings</h3>
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="theme" className="block text-sm font-medium mb-2">
+                    Theme
+                  </label>
+                  <select
+                    id="theme"
+                    name="theme"
+                    value={settingsData.theme || ''}
+                    onChange={handleSettingsChange}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-background"
+                  >
+                    <option value="">Default</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      name="notificationsEnabled"
+                      checked={!!settingsData.notificationsEnabled}
+                      onChange={handleSettingsChange}
+                      className="rounded"
+                    />
+                    <span className="text-sm">Enable Email Notifications</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleSaveSettings}
+              disabled={isLoading}
+              className="bg-primary hover:bg-primary/90"
+            >
               <Save className="w-4 h-4 mr-2" />
               {isLoading ? "Saving..." : "Save Settings"}
             </Button>
           </div>
         )}
 
-        {/* Other tabs remain the same... */}
+        {/* ── Billing tab ───────────────────────────────────────────────────── */}
         {activeTab === "billing" && (
           <div className="space-y-6">
             <div className="p-6 rounded-lg border border-border bg-card">
@@ -471,73 +644,22 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {activeTab === "users" && (
-          <div className="space-y-6">
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold">Team Members</h3>
-                <Button className="bg-primary hover:bg-primary/90">Add User</Button>
-              </div>
-              <div className="space-y-3">
-                {[
-                  { name: "John Doe", email: "john@company.com", role: "Admin" },
-                  { name: "Sarah Ahmed", email: "sarah@company.com", role: "Manager" },
-                  { name: "Ali Hassan", email: "ali@company.com", role: "Staff" },
-                ].map((user, i) => (
-                  <div
-                    key={i}
-                    className="p-4 rounded-lg border border-border bg-card flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="font-semibold text-sm">{user.name}</p>
-                      <p className="text-xs text-muted-foreground">{user.email}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <select className="px-2 py-1 text-sm border border-border rounded bg-background">
-                        <option>{user.role}</option>
-                      </select>
-                      <Button variant="outline" size="sm">
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === "templates" && (
-          <div className="space-y-6">
-            <p className="text-muted-foreground">
-              Manage your contract templates here. You can create custom templates for different rental types.
-            </p>
-            <Button className="bg-primary hover:bg-primary/90">Create Template</Button>
-            <div className="space-y-3">
-              {["Standard Rental", "Long-term Rental", "Business Fleet"].map((template, i) => (
-                <div key={i} className="p-4 rounded-lg border border-border bg-card flex items-center justify-between">
-                  <p className="font-semibold text-sm">{template}</p>
-                  <Button variant="outline" size="sm">
-                    Edit
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
+        {/* ── Notifications tab ─────────────────────────────────────────────── */}
         {activeTab === "notifications" && (
           <div className="space-y-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold">Notification Preferences</h3>
-              <Button variant="outline" size="sm">View All in Dashboard</Button>
+              <Button variant="outline" size="sm" onClick={() => router.push("/dashboard")}>
+                View All in Dashboard
+              </Button>
             </div>
+
             <div className="space-y-4">
               {[
-                { label: "New Contract Created", description: "Notify when a new contract is created" },
-                { label: "Payment Received", description: "Notify when a payment is received" },
-                { label: "Maintenance Due", description: "Notify when vehicle maintenance is due" },
-                { label: "Vehicle Returned", description: "Notify when a vehicle is returned" },
+                { label: "New Contract Created",  description: "Notify when a new contract is created" },
+                { label: "Payment Received",       description: "Notify when a payment is received" },
+                { label: "Maintenance Due",        description: "Notify when vehicle maintenance is due" },
+                { label: "Vehicle Returned",       description: "Notify when a vehicle is returned" },
               ].map((notif, i) => (
                 <label
                   key={i}
@@ -559,9 +681,9 @@ export default function SettingsPage() {
                   Critical Alerts (Preview)
                 </h4>
                 <div className="space-y-3 max-h-48 overflow-y-auto">
-                  {criticalNotifications.map((notif) => (
-                    <div 
-                      key={notif.id} 
+                  {criticalNotifications.map(notif => (
+                    <div
+                      key={notif.id}
                       className="p-3 rounded-lg border-l-4 border-l-destructive bg-destructive/5"
                     >
                       <div className="flex justify-between items-start gap-2">
@@ -576,8 +698,8 @@ export default function SettingsPage() {
                             {new Date(notif.created_at).toLocaleDateString('fr-DZ')}
                           </p>
                         </div>
-                        <button 
-                          onClick={() => handleDismissNotification(notif.id)}
+                        <button
+                          onClick={() => dismissNotification(notif.id)}
                           className="p-1 text-destructive hover:bg-destructive/20 rounded"
                           title="Dismiss"
                         >
@@ -592,36 +714,6 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {activeTab === "language" && (
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium mb-2">Language</label>
-              <select className="w-full px-3 py-2 border border-border rounded-md bg-background">
-                <option>English</option>
-                <option>العربية (Arabic)</option>
-                <option>Français (French)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Time Zone</label>
-              <select className="w-full px-3 py-2 border border-border rounded-md bg-background">
-                <option>Africa/Algiers (GMT+1)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Date Format</label>
-              <select className="w-full px-3 py-2 border border-border rounded-md bg-background">
-                <option>DD/MM/YYYY</option>
-                <option>MM/DD/YYYY</option>
-                <option>YYYY-MM-DD</option>
-              </select>
-            </div>
-            <Button className="bg-primary hover:bg-primary/90">
-              <Save className="w-4 h-4 mr-2" />
-              Save Preferences
-            </Button>
-          </div>
-        )}
       </div>
     </div>
   )

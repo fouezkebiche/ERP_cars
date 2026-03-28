@@ -2,6 +2,12 @@ const express = require('express');
 const router = express.Router();
 
 const adminController = require('../controllers/admin.controller');
+const { authenticateToken } = require('../middleware/auth.middleware');
+const { requireRole } = require('../middleware/permissions.middleware');
+
+// All admin routes require an authenticated user with role 'admin' or 'owner'
+router.use(authenticateToken);
+router.use(requireRole(['admin', 'owner']));
 
 // ============================================
 // Platform Stats
@@ -29,5 +35,12 @@ router.get('/analytics/growth', adminController.getGrowthAnalytics);
 router.get('/analytics/revenue-by-plan', adminController.getRevenueByPlan);
 router.get('/analytics/feature-usage', adminController.getFeatureUsage);
 router.get('/analytics/trending-vehicles', adminController.getTrendingVehicles);
+router.get('/analytics/system-health', adminController.getSystemHealth);
+
+// ============================================
+// Platform Settings (superadmin)
+// ============================================
+router.get('/settings', adminController.getAdminSettings);
+router.put('/settings', adminController.updateAdminSettings);
 
 module.exports = router;

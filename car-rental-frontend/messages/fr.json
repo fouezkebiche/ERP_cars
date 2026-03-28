@@ -1,0 +1,66 @@
+{
+  "nav": {
+    "features": "Fonctionnalités",
+    "pricing": "Tarifs",
+    "howItWorks": "Comment ça marche",
+    "signIn": "Se connecter",
+    "getStarted": "Commencer"
+  },
+  "hero": {
+    "title": "Gérez votre activité de location avec",
+    "highlight": "Confiance",
+    "subtitle": "Plateforme tout-en-un pour la gestion de flotte, CRM client, contrats intelligents, suivi des paiements et analyses complètes.",
+    "startTrial": "Essai gratuit",
+    "watchDemo": "Voir la démo"
+  },
+  "features": {
+    "title": "Fonctionnalités puissantes",
+    "subtitle": "Tout ce dont vous avez besoin pour gérer votre activité efficacement",
+    "items": {
+      "vehicle": { "title": "Gestion de flotte", "desc": "Suivez tous les véhicules, les calendriers de maintenance et la disponibilité en temps réel" },
+      "crm": { "title": "CRM Client", "desc": "Profils clients complets avec historique de location et relevés de paiement" },
+      "contracts": { "title": "Contrats intelligents", "desc": "Contrats numériques avec conditions automatisées et documentation" },
+      "payments": { "title": "Suivi des paiements", "desc": "Surveillez les paiements, factures et transactions financières en toute transparence" },
+      "analytics": { "title": "Analyses & Rapports", "desc": "Informations approfondies sur les revenus, l'utilisation et les performances" },
+      "multiUser": { "title": "Accès multi-utilisateurs", "desc": "Permissions basées sur les rôles pour toute votre équipe" }
+    }
+  },
+  "howItWorks": {
+    "title": "Comment ça marche",
+    "subtitle": "Démarrez en trois étapes simples",
+    "steps": {
+      "signup": { "title": "Inscription", "desc": "Créez votre compte et configurez le profil de votre entreprise" },
+      "fleet": { "title": "Ajoutez votre flotte", "desc": "Ajoutez tous vos véhicules avec leurs détails et spécifications" },
+      "manage": { "title": "Commencez à gérer", "desc": "Commencez à créer des contrats et à gérer les locations" }
+    }
+  },
+  "pricing": {
+    "title": "Tarification simple et transparente",
+    "subtitle": "Plans à partir de 5 000 DZD/mois",
+    "viewPlans": "Voir tous les plans"
+  },
+  "social": {
+    "trusted": "Approuvé par plus de 150 sociétés de location en Algérie",
+    "testimonials": {
+      "elite": { "name": "Elite Rentals", "quote": "CarManager a transformé notre façon de travailler. Fortement recommandé !" },
+      "speed": { "name": "Speed Motors", "quote": "Meilleur investissement pour notre entreprise. L'équipe support est excellente." },
+      "premium": { "name": "Premium Fleet", "quote": "Les analyses seules nous ont fait économiser des milliers en coûts opérationnels." }
+    }
+  },
+  "cta": {
+    "title": "Prêt à transformer votre activité de location ?",
+    "subtitle": "Rejoignez des centaines d'entreprises qui utilisent CarManager aujourd'hui.",
+    "button": "Commencer gratuitement"
+  },
+  "footer": {
+    "product": "Produit",
+    "company": "Entreprise",
+    "legal": "Légal",
+    "language": "Langue",
+    "about": "À propos",
+    "contact": "Contact",
+    "terms": "Conditions",
+    "privacy": "Confidentialité",
+    "copyright": "© 2025 CarManager. Tous droits réservés."
+  }
+}

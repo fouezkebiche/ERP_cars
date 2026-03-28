@@ -1,7 +1,8 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { Menu, RefreshCw, Bell } from "lucide-react"
+import { Menu, RefreshCw, Bell, LogOut } from "lucide-react"
+import { useAuth } from "@/context/AuthContext"
 
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   "/admin": { title: "Platform Overview", subtitle: "Monitor all companies & platform health" },
@@ -18,6 +19,7 @@ interface Props {
 export function AdminTopbar({ onMenuClick }: Props) {
   const pathname = usePathname()
   const meta = PAGE_META[pathname] || { title: "Admin", subtitle: "" }
+  const { logout } = useAuth()
 
   return (
     <header
@@ -61,6 +63,13 @@ export function AdminTopbar({ onMenuClick }: Props) {
             className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full"
             style={{ background: "#c084fc" }}
           />
+        </button>
+        <button
+          onClick={logout}
+          className="p-1.5 rounded-md transition-colors hover:bg-white/5"
+          title="Logout"
+        >
+          <LogOut size={16} style={{ color: "rgba(255,255,255,0.4)" }} />
         </button>
         <div
           className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ml-2"

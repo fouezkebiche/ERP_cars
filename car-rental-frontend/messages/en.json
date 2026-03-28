@@ -1,0 +1,66 @@
+{
+  "nav": {
+    "features": "Features",
+    "pricing": "Pricing",
+    "howItWorks": "How It Works",
+    "signIn": "Sign In",
+    "getStarted": "Get Started"
+  },
+  "hero": {
+    "title": "Manage Your Car Rental Business with",
+    "highlight": "Confidence",
+    "subtitle": "All-in-one platform for vehicle management, customer CRM, smart contracts, payment tracking, and comprehensive analytics.",
+    "startTrial": "Start Free Trial",
+    "watchDemo": "Watch Demo"
+  },
+  "features": {
+    "title": "Powerful Features",
+    "subtitle": "Everything you need to run your rental business efficiently",
+    "items": {
+      "vehicle": { "title": "Vehicle Management", "desc": "Track all vehicles, maintenance schedules, and availability in real-time" },
+      "crm": { "title": "Customer CRM", "desc": "Complete customer profiles with rental history and payment records" },
+      "contracts": { "title": "Smart Contracts", "desc": "Digital contracts with automated terms and documentation" },
+      "payments": { "title": "Payment Tracking", "desc": "Monitor payments, invoices, and financial transactions seamlessly" },
+      "analytics": { "title": "Analytics & Reports", "desc": "Deep insights into revenue, utilization, and business performance" },
+      "multiUser": { "title": "Multi-User Access", "desc": "Role-based permissions for your entire team" }
+    }
+  },
+  "howItWorks": {
+    "title": "How It Works",
+    "subtitle": "Get started in three simple steps",
+    "steps": {
+      "signup": { "title": "Sign Up", "desc": "Create your account and set up your company profile" },
+      "fleet": { "title": "Add Your Fleet", "desc": "Add all your vehicles with details and specifications" },
+      "manage": { "title": "Start Managing", "desc": "Begin creating contracts and managing rentals" }
+    }
+  },
+  "pricing": {
+    "title": "Simple, Transparent Pricing",
+    "subtitle": "Plans starting from 5,000 DZD/month",
+    "viewPlans": "View All Plans"
+  },
+  "social": {
+    "trusted": "Trusted by 150+ rental companies across Algeria",
+    "testimonials": {
+      "elite": { "name": "Elite Rentals", "quote": "CarManager has transformed how we operate. Highly recommended!" },
+      "speed": { "name": "Speed Motors", "quote": "Best investment for our business. Support team is excellent." },
+      "premium": { "name": "Premium Fleet", "quote": "The analytics alone saved us thousands in operational costs." }
+    }
+  },
+  "cta": {
+    "title": "Ready to transform your rental business?",
+    "subtitle": "Join hundreds of successful companies using CarManager today.",
+    "button": "Get Started Free"
+  },
+  "footer": {
+    "product": "Product",
+    "company": "Company",
+    "legal": "Legal",
+    "language": "Language",
+    "about": "About",
+    "contact": "Contact",
+    "terms": "Terms",
+    "privacy": "Privacy",
+    "copyright": "© 2025 CarManager. All rights reserved."
+  }
+}

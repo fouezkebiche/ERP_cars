@@ -220,6 +220,142 @@ async function apiFetch<T>(path: string, queryParams?: Record<string, any>): Pro
 }
 
 // ────────────────────────────────────────────────
+// SPECIALIZED HELPERS FOR NON-ANALYTICS ENDPOINTS
+// (contracts & payments stats live on their own routes)
+// ────────────────────────────────────────────────
+
+async function fetchContractStatsFromApi(): Promise<ContractAnalytics> {
+  const url = new URL('/api/contracts/stats', BASE_URL)
+
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers: getAuthHeaders(),
+    cache: 'no-store',
+  })
+
+  if (!response.ok) {
+    let errorMessage = `HTTP ${response.status}`
+    try {
+      const errData = await response.json()
+      errorMessage = errData.message || errorMessage
+    } catch {}
+
+    if (response.status === 401) {
+      throw new Error('Authentication required. Please login first.')
+    }
+
+    throw new Error(errorMessage)
+  }
+
+  const json = await response.json()
+  const stats = json?.data?.stats ?? json?.data ?? json?.stats ?? {}
+
+  const totalContracts = Number(stats.total_contracts ?? 0)
+  const byStatus = stats.by_status ?? {}
+  const active = Number(byStatus.active ?? 0)
+  const completed = Number(byStatus.completed ?? 0)
+  const cancelled = Number(byStatus.cancelled ?? 0)
+  const totalRevenue = Number(stats.total_revenue ?? 0)
+
+  const completionRate =
+    totalContracts > 0 ? (completed / totalContracts) * 100 : 0
+
+  const avgContractValue =
+    totalContracts > 0 ? totalRevenue / totalContracts : 0
+
+  const result: ContractAnalytics = {
+    total_contracts: totalContracts,
+    by_status: {
+      active,
+      completed,
+      cancelled,
+    },
+    avg_contract_value: avgContractValue,
+    // Backend doesn't currently expose this; can be enhanced later
+    avg_duration_days: 0,
+    completion_rate: completionRate,
+    // Not implemented on the backend yet
+    contracts_by_day: [],
+  }
+
+  return result
+}
+
+async function fetchPaymentStatsFromApi(): Promise<PaymentAnalytics> {
+  const url = new URL('/api/payments/stats', BASE_URL)
+
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers: getAuthHeaders(),
+    cache: 'no-store',
+  })
+
+  if (!response.ok) {
+    let errorMessage = `HTTP ${response.status}`
+    try {
+      const errData = await response.json()
+      errorMessage = errData.message || errorMessage
+    } catch {}
+
+    if (response.status === 401) {
+      throw new Error('Authentication required. Please login first.')
+    }
+
+    throw new Error(errorMessage)
+  }
+
+  const json = await response.json()
+  const stats = json?.data?.stats ?? json?.data ?? json?.stats ?? {}
+
+  const totalPayments = Number(stats.total_payments ?? 0)
+  const byStatus = stats.by_status ?? {}
+  const completed = Number(byStatus.completed ?? 0)
+  const pending = Number(byStatus.pending ?? 0)
+  const failed = Number(byStatus.failed ?? 0)
+  const totalAmount = Number(stats.total_revenue ?? 0)
+
+  const averagePayment =
+    completed > 0 ? totalAmount / completed : 0
+
+  const byMethodRaw: Record<string, number> = stats.by_method ?? {}
+  const byMethodArray = Object.entries(byMethodRaw).map(
+    ([method, count]) => {
+      const c = Number(count ?? 0)
+      const percentage =
+        totalPayments > 0 ? (c / totalPayments) * 100 : 0
+
+      return {
+        method,
+        count: c,
+        // Backend stats endpoint does not expose per‑method amounts yet
+        amount: 0,
+        percentage,
+      }
+    }
+  )
+
+  const result: PaymentAnalytics = {
+    total_payments: totalPayments,
+    total_amount: totalAmount,
+    by_status: {
+      completed,
+      pending,
+      failed,
+    },
+    by_method: byMethodArray,
+    average_payment: averagePayment,
+    // Not yet implemented on backend analytics; keep empty for now
+    payments_by_day: [],
+    outstanding: {
+      count: 0,
+      total_amount: 0,
+    },
+  }
+
+  return result
+}
+
+// ────────────────────────────────────────────────
 // PUBLIC API
 // ────────────────────────────────────────────────
 
@@ -272,10 +408,17 @@ export const analyticsAPI = {
   },
 
   getContractStats: async (params?: AnalyticsPeriod): Promise<ContractAnalytics> => {
-    return apiFetch<ContractAnalytics>('/contracts', params)
+    // Currently contract stats live on /api/contracts/stats
+    // and not under /api/analytics, so we call that endpoint
+    // directly and adapt the response to our frontend type.
+    void params // kept for future enhancement (period filters etc.)
+    return fetchContractStatsFromApi()
   },
 
   getPaymentStats: async (params?: AnalyticsPeriod): Promise<PaymentAnalytics> => {
-    return apiFetch<PaymentAnalytics>('/payments', params)
+    // Payment stats live on /api/payments/stats;
+    // call that endpoint directly and adapt the response.
+    void params // kept for future enhancement (period filters etc.)
+    return fetchPaymentStatsFromApi()
   },
 }

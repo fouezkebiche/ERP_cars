@@ -10,14 +10,23 @@ import { PaymentMethodsChart } from '@/components/analytics/payment-methods-char
 import { UtilizationChart } from '@/components/analytics/utilization-chart'
 import { ContractsChart } from '@/components/analytics/contracts-chart'
 import { AnalyticsFilters } from '@/components/analytics/analytics-filters'
-import { 
-  useDashboard, 
-  useRevenue, 
+import {
+  useDashboard,
+  useRevenue,
   useVehiclePerformance,
   useCustomerSegmentation,
   useContractAnalytics,
   usePaymentAnalytics
 } from '@/hooks/useAnalytics'
+import { useReports } from '@/hooks/useReports'
+import type { ReportType, ReportFilters as AdvancedReportFilters } from '@/lib/reports'
+import { ReportFilters } from '@/components/reports/ReportFilters'
+import { ExportButtons } from '@/components/reports/ExportButtons'
+import {
+  ExecutiveSummaryView,
+  VehiclePerformanceView,
+  CustomerInsightsView,
+} from '@/components/reports/ReportViews'
 import {
   BarChart3,
   TrendingUp,
@@ -42,6 +51,20 @@ export default function AnalyticsPage() {
   })
 
   const [vehicleMetric, setVehicleMetric] = useState<'utilization' | 'revenue' | 'profit'>('utilization')
+
+  // Advanced reports state (from previous Reports page)
+  const [reportType, setReportType] = useState<ReportType>('executive')
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedReportFilters>({ period: 'month' })
+
+  const {
+    data: reportData,
+    loading: reportLoading,
+    error: reportError,
+    generateReport,
+    downloadPDF,
+    downloadExcel,
+    downloadJSON,
+  } = useReports()
 
   // Fetch all analytics data
   const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboard(dateRange)
@@ -77,27 +100,26 @@ export default function AnalyticsPage() {
     }
   }
 
+  const handleAdvancedFiltersApply = (filters: AdvancedReportFilters) => {
+    setAdvancedFilters(filters)
+  }
+
+  const handleAdvancedFiltersReset = () => {
+    setAdvancedFilters({ period: 'month' })
+  }
+
+  const handleGenerateReport = async () => {
+    await generateReport(reportType, advancedFilters)
+  }
+
+  // Top-right export button: generate an executive PDF report
   const handleExportReport = async () => {
     try {
-      const reportData = {
-        period: dateRange,
-        dashboard: dashboardData,
-        revenue: revenueData,
-        vehicles: vehicleData,
-        customers: customerData,
-        contracts: contractData,
-        payments: paymentData,
-        generated_at: new Date().toISOString(),
-      }
-      
-      const jsonStr = JSON.stringify(reportData, null, 2)
-      const blob = new Blob([jsonStr], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `analytics-report-${new Date().toISOString().split('T')[0]}.json`
-      a.click()
-      URL.revokeObjectURL(url)
+      await downloadPDF('executive', {
+        period: dateRange.period,
+        startDate: dateRange.start_date,
+        endDate: dateRange.end_date,
+      })
     } catch (err) {
       console.error('Export failed:', err)
     }
@@ -189,12 +211,13 @@ export default function AnalyticsPage() {
 
       {/* Tabs for Different Analytics Views */}
       <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="revenue">Revenue</TabsTrigger>
           <TabsTrigger value="vehicles">Vehicles</TabsTrigger>
           <TabsTrigger value="contracts">Contracts</TabsTrigger>
           <TabsTrigger value="customers">Customers</TabsTrigger>
+          <TabsTrigger value="reports">Advanced Reports</TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -651,6 +674,131 @@ export default function AnalyticsPage() {
                 ]}
                 data={customerData.segments.vip.customers}
               />
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Advanced Reports Tab (merged from /dashboard/reports) */}
+        <TabsContent value="reports" className="space-y-8">
+          {/* Header + export */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-bold mb-1">Advanced Reports</h2>
+              <p className="text-muted-foreground">
+                Executive, vehicle, and customer reports with export options
+              </p>
+            </div>
+
+            {reportData && (
+              <ExportButtons
+                onDownloadPDF={() => downloadPDF(reportType, advancedFilters)}
+                onDownloadExcel={() => downloadExcel(reportType, advancedFilters)}
+                onDownloadJSON={() => downloadJSON(reportType, advancedFilters)}
+                loading={reportLoading}
+              />
+            )}
+          </div>
+
+          {/* Report type selector */}
+          <div>
+            <h3 className="text-lg font-semibold mb-4">Select Report Type</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <button
+                onClick={() => setReportType('executive')}
+                className={`p-6 rounded-lg border-2 transition-all ${
+                  reportType === 'executive'
+                    ? 'bg-primary text-primary-foreground border-primary shadow-lg scale-105'
+                    : 'bg-card border-border hover:border-primary/50 hover:shadow-md'
+                }`}
+              >
+                <BarChart3 className="w-8 h-8 mx-auto mb-3" />
+                <div className="font-semibold text-lg">Executive Summary</div>
+                <div className="text-xs mt-2 opacity-80">
+                  Overall business KPIs & trends
+                </div>
+              </button>
+
+              <button
+                onClick={() => setReportType('vehicle')}
+                className={`p-6 rounded-lg border-2 transition-all ${
+                  reportType === 'vehicle'
+                    ? 'bg-primary text-primary-foreground border-primary shadow-lg scale-105'
+                    : 'bg-card border-border hover:border-primary/50 hover:shadow-md'
+                }`}
+              >
+                <Car className="w-8 h-8 mx-auto mb-3" />
+                <div className="font-semibold text-lg">Vehicle Performance</div>
+                <div className="text-xs mt-2 opacity-80">
+                  Fleet analytics & P&L
+                </div>
+              </button>
+
+              <button
+                onClick={() => setReportType('customer')}
+                className={`p-6 rounded-lg border-2 transition-all ${
+                  reportType === 'customer'
+                    ? 'bg-primary text-primary-foreground border-primary shadow-lg scale-105'
+                    : 'bg-card border-border hover:border-primary/50 hover:shadow-md'
+                }`}
+              >
+                <Users className="w-8 h-8 mx-auto mb-3" />
+                <div className="font-semibold text-lg">Customer Insights</div>
+                <div className="text-xs mt-2 opacity-80">
+                  Segmentation & retention
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Filters */}
+          <ReportFilters
+            onApply={handleAdvancedFiltersApply}
+            onReset={handleAdvancedFiltersReset}
+          />
+
+          {/* Generate button */}
+          <Button
+            onClick={handleGenerateReport}
+            disabled={reportLoading}
+            className="w-full md:w-auto gap-2"
+            size="lg"
+          >
+            <Download className="w-4 h-4" />
+            {reportLoading ? 'Generating...' : 'Generate Report'}
+          </Button>
+
+          {/* Error display */}
+          {reportError && (
+            <div className="p-4 rounded-lg border-l-4 border-l-destructive bg-destructive/10">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-destructive" />
+                <p className="font-semibold">Error</p>
+              </div>
+              <p className="text-sm mt-2 text-muted-foreground">{reportError}</p>
+            </div>
+          )}
+
+          {/* Report preview */}
+          {reportData && !reportError && (
+            <div className="space-y-8">
+              {reportData.report_type === 'executive_summary' && (
+                <ExecutiveSummaryView
+                  report={reportData as any}
+                  formatCurrency={formatCurrency}
+                />
+              )}
+              {reportData.report_type === 'vehicle_performance' && (
+                <VehiclePerformanceView
+                  report={reportData as any}
+                  formatCurrency={formatCurrency}
+                />
+              )}
+              {reportData.report_type === 'customer_insights' && (
+                <CustomerInsightsView
+                  report={reportData as any}
+                  formatCurrency={formatCurrency}
+                />
+              )}
             </div>
           )}
         </TabsContent>

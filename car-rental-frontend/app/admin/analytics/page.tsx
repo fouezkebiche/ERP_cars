@@ -4,17 +4,15 @@ import { useEffect, useState, useRef } from "react"
 import {
   TrendingUp, Users, DollarSign, Activity,
   ArrowUpRight, ArrowDownRight, RefreshCw,
-  Building2, FileText, Zap
+  Building2, FileText, Zap, UserCheck,
+  TrendingDown, BarChart3, Repeat2
 } from "lucide-react"
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 function authHeaders() {
   const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : ""
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  }
+  return { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
 }
 
 async function apiFetch(path: string) {
@@ -24,64 +22,39 @@ async function apiFetch(path: string) {
   return json.data
 }
 
-// ─── Skeleton ────────────────────────────────────────────────────────────────
 function Skeleton({ className = "" }: { className?: string }) {
   return (
-    <div
-      className={`animate-pulse rounded-lg ${className}`}
-      style={{ background: "rgba(255,255,255,0.05)" }}
-    />
+    <div className={`animate-pulse rounded-lg ${className}`}
+      style={{ background: "rgba(255,255,255,0.05)" }} />
   )
 }
 
-// ─── KPI Card ────────────────────────────────────────────────────────────────
-function KPI({
-  label, value, suffix = "", trend, icon, loading, accent = "#818cf8"
-}: {
-  label: string
-  value: string | number
-  suffix?: string
-  trend?: number
-  icon: React.ReactNode
-  loading?: boolean
-  accent?: string
+function KPI({ label, value, suffix = "", trend, icon, loading, accent = "#818cf8" }: {
+  label: string; value: string | number; suffix?: string
+  trend?: number; icon: React.ReactNode; loading?: boolean; accent?: string
 }) {
   return (
-    <div
-      className="rounded-2xl p-5 relative overflow-hidden flex flex-col gap-3"
-      style={{ background: "#080810", border: "1px solid rgba(255,255,255,0.07)" }}
-    >
-      <div
-        className="absolute top-0 right-0 w-32 h-32 rounded-full pointer-events-none"
-        style={{ background: `radial-gradient(circle, ${accent}18 0%, transparent 70%)`, transform: "translate(30%, -30%)" }}
-      />
+    <div className="rounded-2xl p-5 relative overflow-hidden flex flex-col gap-3"
+      style={{ background: "#080810", border: "1px solid rgba(255,255,255,0.07)" }}>
+      <div className="absolute top-0 right-0 w-32 h-32 rounded-full pointer-events-none"
+        style={{ background: `radial-gradient(circle, ${accent}18 0%, transparent 70%)`, transform: "translate(30%, -30%)" }} />
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.35)", fontFamily: "monospace" }}>
-          {label}
-        </p>
-        <div className="p-2 rounded-lg" style={{ background: `${accent}18`, color: accent }}>
-          {icon}
-        </div>
+        <p className="text-xs font-semibold uppercase tracking-widest"
+          style={{ color: "rgba(255,255,255,0.35)", fontFamily: "monospace" }}>{label}</p>
+        <div className="p-2 rounded-lg" style={{ background: `${accent}18`, color: accent }}>{icon}</div>
       </div>
-
-      {loading ? (
-        <Skeleton className="h-9 w-32" />
-      ) : (
-        <p className="text-3xl font-black text-white" style={{ fontFamily: "'DM Mono', 'Courier New', monospace", fontVariantNumeric: "tabular-nums" }}>
-          {value}
-          {suffix && <span className="text-base ml-1.5 font-medium" style={{ color: "rgba(255,255,255,0.3)" }}>{suffix}</span>}
-        </p>
-      )}
-
+      {loading
+        ? <Skeleton className="h-9 w-32" />
+        : <p className="text-3xl font-black text-white"
+            style={{ fontFamily: "'DM Mono', 'Courier New', monospace", fontVariantNumeric: "tabular-nums" }}>
+            {value}
+            {suffix && <span className="text-base ml-1.5 font-medium" style={{ color: "rgba(255,255,255,0.3)" }}>{suffix}</span>}
+          </p>
+      }
       {trend !== undefined && !loading && (
         <div className="flex items-center gap-1.5 text-xs">
-          <div
-            className="flex items-center gap-1 px-2 py-0.5 rounded-full"
-            style={{
-              background: trend >= 0 ? "rgba(52,211,153,0.1)" : "rgba(248,113,113,0.1)",
-              color: trend >= 0 ? "#34d399" : "#f87171",
-            }}
-          >
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full"
+            style={{ background: trend >= 0 ? "rgba(52,211,153,0.1)" : "rgba(248,113,113,0.1)", color: trend >= 0 ? "#34d399" : "#f87171" }}>
             {trend >= 0 ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
             <span style={{ fontFamily: "monospace" }}>{trend >= 0 ? "+" : ""}{trend}%</span>
           </div>
@@ -92,26 +65,20 @@ function KPI({
   )
 }
 
-// ─── SVG Sparkline ───────────────────────────────────────────────────────────
 function Sparkline({ data, color = "#c084fc" }: { data: number[]; color?: string }) {
   if (!data || data.length < 2) return null
   const w = 400; const h = 100; const pad = 12
-  const max = Math.max(...data)
-  const min = Math.min(...data)
-  const range = max - min || 1
-  const pts = data.map((v, i) => {
-    const x = pad + (i / (data.length - 1)) * (w - pad * 2)
-    const y = h - pad - ((v - min) / range) * (h - pad * 2)
-    return [x, y]
-  })
-  // Smooth path using bezier curves
+  const max = Math.max(...data); const min = Math.min(...data); const range = max - min || 1
+  const pts = data.map((v, i) => [
+    pad + (i / (data.length - 1)) * (w - pad * 2),
+    h - pad - ((v - min) / range) * (h - pad * 2)
+  ])
   let d = `M ${pts[0][0]},${pts[0][1]}`
   for (let i = 1; i < pts.length; i++) {
     const cx = (pts[i - 1][0] + pts[i][0]) / 2
     d += ` C ${cx},${pts[i - 1][1]} ${cx},${pts[i][1]} ${pts[i][0]},${pts[i][1]}`
   }
   const area = `${d} L ${pts[pts.length - 1][0]},${h - pad} L ${pts[0][0]},${h - pad} Z`
-
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
       <defs>
@@ -122,7 +89,6 @@ function Sparkline({ data, color = "#c084fc" }: { data: number[]; color?: string
       </defs>
       <path d={area} fill={`url(#sg-${color.replace('#', '')})`} />
       <path d={d} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-      {/* Dots at each data point */}
       {pts.map(([x, y], i) => (
         <circle key={i} cx={x} cy={y} r="3" fill={color} opacity={i === pts.length - 1 ? 1 : 0.4} />
       ))}
@@ -130,7 +96,6 @@ function Sparkline({ data, color = "#c084fc" }: { data: number[]; color?: string
   )
 }
 
-// ─── Bar Chart ───────────────────────────────────────────────────────────────
 function BarChart({ data, color = "#818cf8" }: { data: { label: string; value: number }[]; color?: string }) {
   const max = Math.max(...data.map(d => d.value), 1)
   return (
@@ -140,75 +105,87 @@ function BarChart({ data, color = "#818cf8" }: { data: { label: string; value: n
           <span className="text-xs font-mono font-bold" style={{ color: "rgba(255,255,255,0.5)", fontSize: 10 }}>
             {d.value > 0 ? d.value : ""}
           </span>
-          <div
-            className="w-full rounded-t-md transition-all duration-700"
-            style={{
-              height: `${Math.max((d.value / max) * 80, d.value > 0 ? 4 : 0)}%`,
-              background: `linear-gradient(to top, ${color}aa, ${color})`,
-            }}
-          />
-          <span className="text-xs" style={{ color: "rgba(255,255,255,0.25)", fontFamily: "monospace", fontSize: 9 }}>
-            {d.label}
-          </span>
+          <div className="w-full rounded-t-md transition-all duration-700"
+            style={{ height: `${Math.max((d.value / max) * 80, d.value > 0 ? 4 : 0)}%`, background: `linear-gradient(to top, ${color}aa, ${color})` }} />
+          <span className="text-xs" style={{ color: "rgba(255,255,255,0.25)", fontFamily: "monospace", fontSize: 9 }}>{d.label}</span>
         </div>
       ))}
     </div>
   )
 }
 
-// ─── Donut Chart ─────────────────────────────────────────────────────────────
 function DonutChart({ segments }: { segments: { label: string; value: number; color: string }[] }) {
   const total = segments.reduce((s, seg) => s + seg.value, 0)
   if (total === 0) return null
-  const r = 40; const cx = 60; const cy = 60; const strokeW = 14
-  let cumAngle = -90
-
+  const r = 40; const cx = 60; const cy = 60; const strokeW = 14; let cumAngle = -90
   return (
     <svg width={120} height={120} viewBox="0 0 120 120">
       {segments.map((seg, i) => {
-        const pct = seg.value / total
-        const angle = pct * 360
+        const angle = (seg.value / total) * 360
         const startRad = (cumAngle * Math.PI) / 180
         const endRad = ((cumAngle + angle) * Math.PI) / 180
-        const x1 = cx + r * Math.cos(startRad)
-        const y1 = cy + r * Math.sin(startRad)
-        const x2 = cx + r * Math.cos(endRad)
-        const y2 = cy + r * Math.sin(endRad)
-        const largeArc = angle > 180 ? 1 : 0
-        const pathD = `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}`
+        const x1 = cx + r * Math.cos(startRad); const y1 = cy + r * Math.sin(startRad)
+        const x2 = cx + r * Math.cos(endRad); const y2 = cy + r * Math.sin(endRad)
+        const path = `M ${x1} ${y1} A ${r} ${r} 0 ${angle > 180 ? 1 : 0} 1 ${x2} ${y2}`
         cumAngle += angle
-        return (
-          <path
-            key={i}
-            d={pathD}
-            fill="none"
-            stroke={seg.color}
-            strokeWidth={strokeW}
-            strokeLinecap="round"
-            opacity={0.85}
-          />
-        )
+        return <path key={i} d={path} fill="none" stroke={seg.color} strokeWidth={strokeW} strokeLinecap="round" opacity={0.85} />
       })}
       <circle cx={cx} cy={cy} r={r - strokeW / 2 - 2} fill="#080810" />
-      <text x={cx} y={cy - 4} textAnchor="middle" fill="white" fontSize="11" fontWeight="bold" fontFamily="monospace">
-        {total}
-      </text>
-      <text x={cx} y={cy + 10} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize="7" fontFamily="monospace">
-        companies
-      </text>
+      <text x={cx} y={cy - 4} textAnchor="middle" fill="white" fontSize="11" fontWeight="bold" fontFamily="monospace">{total}</text>
+      <text x={cx} y={cy + 10} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize="7" fontFamily="monospace">companies</text>
     </svg>
+  )
+}
+
+// ── Health metric card ────────────────────────────────────────────────────────
+function HealthCard({
+  label, value, note, icon, accent, loading,
+  status,   // "good" | "warn" | "bad" | "neutral"
+}: {
+  label: string; value: string; note: string; icon: React.ReactNode
+  accent: string; loading: boolean; status: "good" | "warn" | "bad" | "neutral"
+}) {
+  const statusColor = {
+    good:    "#34d399",
+    warn:    "#fbbf24",
+    bad:     "#f87171",
+    neutral: "rgba(255,255,255,0.4)",
+  }[status]
+
+  const statusDot = status !== "neutral"
+
+  return (
+    <div className="rounded-xl p-4" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>{label}</p>
+        <div style={{ color: accent }}>{icon}</div>
+      </div>
+      {loading
+        ? <Skeleton className="h-8 w-20 mb-2" />
+        : <p className="text-2xl font-black text-white mb-1" style={{ fontFamily: "'DM Mono', monospace" }}>{value}</p>
+      }
+      {loading
+        ? <Skeleton className="h-3 w-28" />
+        : <div className="flex items-center gap-1.5">
+            {statusDot && <div className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor }} />}
+            <p className="text-xs" style={{ color: statusColor, fontFamily: "monospace" }}>{note}</p>
+          </div>
+      }
+    </div>
   )
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AdminAnalyticsPage() {
-  const [stats, setStats] = useState<any>(null)
-  const [growth, setGrowth] = useState<any[]>([])
+  const [stats, setStats]               = useState<any>(null)
+  const [growth, setGrowth]             = useState<any[]>([])
   const [revenueByPlan, setRevenueByPlan] = useState<any[]>([])
-  const [features, setFeatures] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
+  const [features, setFeatures]         = useState<any[]>([])
+  const [health, setHealth]             = useState<any>(null)
+  const [loading, setLoading]           = useState(true)
+  const [healthLoading, setHealthLoading] = useState(true)
+  const [error, setError]               = useState<string | null>(null)
+  const [refreshing, setRefreshing]     = useState(false)
 
   async function load(isRefresh = false) {
     if (isRefresh) setRefreshing(true)
@@ -224,29 +201,16 @@ export default function AdminAnalyticsPage() {
       ])
 
       setStats(statsData)
-
-      // Backend returns { months: [...] } with fields: month, mrr, new_companies, total_companies
       const months = growthData?.months || []
       setGrowth(months.map((g: any) => ({
-        label: g.month,          // "Jan 2025"
-        mrr: g.mrr || 0,
-        new_companies: g.new_companies || 0,
-        total_companies: g.total_companies || 0,
+        label: g.month, mrr: g.mrr || 0,
+        new_companies: g.new_companies || 0, total_companies: g.total_companies || 0,
       })))
-
-      // Backend returns { plans: [...], total_mrr } with fields: plan, company_count, total_mrr, avg_mrr, percentage
-      const plans = revenueData?.plans || []
-      setRevenueByPlan(plans)
-
-      // Backend returns { features: [...], total_companies } with fields: feature, companies_using, adoption_rate
-      const feats = featureData?.features || []
-      setFeatures(feats.map((f: any) => ({
-        name: f.feature,
-        adoption: f.adoption_rate,
-        companies: f.companies_using,
+      setRevenueByPlan(revenueData?.plans || [])
+      setFeatures((featureData?.features || []).map((f: any) => ({
+        name: f.feature, adoption: f.adoption_rate, companies: f.companies_using,
       })))
     } catch (e: any) {
-      console.error("Failed to load analytics:", e)
       setError(e.message || "Failed to load analytics")
     } finally {
       setLoading(false)
@@ -254,33 +218,97 @@ export default function AdminAnalyticsPage() {
     }
   }
 
-  useEffect(() => { load() }, [])
-
-  // Derived data
-  const mrrValues = growth.map(g => g.mrr)
-  const newCompanyBars = growth.map(g => ({ label: g.label?.split(" ")[0] || "", value: g.new_companies }))
-
-  const planColors: Record<string, string> = {
-    enterprise: "#c084fc",
-    professional: "#60a5fa",
-    basic: "#94a3b8",
+  async function loadHealth(isRefresh = false) {
+    if (!isRefresh) setHealthLoading(true)
+    try {
+      const data = await apiFetch("/api/admin/analytics/system-health")
+      setHealth(data)
+    } catch (e) {
+      console.error("Health fetch failed:", e)
+    } finally {
+      setHealthLoading(false)
+    }
   }
 
-  const donutSegments = revenueByPlan.map(p => ({
-    label: p.plan,
-    value: p.company_count,
-    color: planColors[p.plan] || "#9ca3af",
-  }))
+  useEffect(() => { load(); loadHealth() }, [])
 
-  const totalMrr = stats?.revenue?.total_mrr ?? 0
-  const mrrGrowth = growth.length >= 2
+  async function handleRefresh() {
+    setRefreshing(true)
+    await Promise.all([load(true), loadHealth(true)])
+    setRefreshing(false)
+  }
+
+  // Derived
+  const mrrValues      = growth.map(g => g.mrr)
+  const newCompanyBars = growth.map(g => ({ label: g.label?.split(" ")[0] || "", value: g.new_companies }))
+  const planColors: Record<string, string> = { enterprise: "#c084fc", professional: "#60a5fa", basic: "#94a3b8" }
+  const donutSegments  = revenueByPlan.map(p => ({ label: p.plan, value: p.company_count, color: planColors[p.plan] || "#9ca3af" }))
+  const totalMrr       = stats?.revenue?.total_mrr ?? 0
+  const mrrGrowth      = growth.length >= 2
     ? parseFloat((((growth[growth.length - 1].mrr - growth[0].mrr) / Math.max(1, growth[0].mrr)) * 100).toFixed(1))
     : 0
+
+  // ── Derive status labels from live data ──────────────────────────────────
+  const churnRate       = health?.churn_rate ?? 0
+  const convRate        = health?.conversion_rate ?? 0
+  const engagementRate  = health?.engagement_rate ?? 0
+  const avgContracts    = health?.avg_contracts_per_co ?? 0
+
+  const healthCards = [
+    {
+      label: "Churn Rate",
+      value: healthLoading ? "—" : `${churnRate}%`,
+      note:  churnRate === 0 ? "No churns this month" : churnRate <= 3 ? "Healthy" : churnRate <= 7 ? "Monitor closely" : "High — action needed",
+      icon:  <TrendingDown size={14} />,
+      accent: "#f87171",
+      status: (churnRate === 0 || churnRate <= 3 ? "good" : churnRate <= 7 ? "warn" : "bad") as "good"|"warn"|"bad"|"neutral",
+    },
+    {
+      label: "Trial → Paid",
+      value: healthLoading ? "—" : `${convRate}%`,
+      note:  convRate === 0 ? "No conversions yet" : convRate >= 30 ? "Excellent conversion" : convRate >= 15 ? "Good" : "Needs improvement",
+      icon:  <Repeat2 size={14} />,
+      accent: "#34d399",
+      status: (convRate >= 30 ? "good" : convRate >= 15 ? "warn" : convRate === 0 ? "neutral" : "bad") as "good"|"warn"|"bad"|"neutral",
+    },
+    {
+      label: "Company Engagement",
+      value: healthLoading ? "—" : `${engagementRate}%`,
+      note:  `${health?.engaged_companies ?? "—"}/${health?.active_companies ?? "—"} active this month`,
+      icon:  <UserCheck size={14} />,
+      accent: "#60a5fa",
+      status: (engagementRate >= 70 ? "good" : engagementRate >= 40 ? "warn" : engagementRate === 0 ? "neutral" : "bad") as "good"|"warn"|"bad"|"neutral",
+    },
+    {
+      label: "Avg Contracts/Co",
+      value: healthLoading ? "—" : String(avgContracts),
+      note:  `${health?.contracts_this_month ?? "—"} total contracts this month`,
+      icon:  <BarChart3 size={14} />,
+      accent: "#fbbf24",
+      status: (avgContracts >= 5 ? "good" : avgContracts >= 2 ? "warn" : avgContracts === 0 ? "neutral" : "bad") as "good"|"warn"|"bad"|"neutral",
+    },
+    {
+      label: "Revenue (30d)",
+      value: healthLoading ? "—" : `${Math.round(health?.revenue_this_month ?? 0).toLocaleString("fr-DZ")}`,
+      note:  "DZD collected via payments",
+      icon:  <DollarSign size={14} />,
+      accent: "#c084fc",
+      status: ((health?.revenue_this_month ?? 0) > 0 ? "good" : "neutral") as "good"|"warn"|"bad"|"neutral",
+    },
+    {
+      label: "Contracts (7d)",
+      value: healthLoading ? "—" : String(health?.recent_contracts_7d ?? "—"),
+      note:  "Platform-wide this week",
+      icon:  <Activity size={14} />,
+      accent: "#818cf8",
+      status: ((health?.recent_contracts_7d ?? 0) > 0 ? "good" : "neutral") as "good"|"warn"|"bad"|"neutral",
+    },
+  ]
 
   return (
     <div className="space-y-6 max-w-[1400px]">
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-white" style={{ fontFamily: "monospace" }}>Analytics</h1>
@@ -288,23 +316,15 @@ export default function AdminAnalyticsPage() {
             Platform-wide metrics & growth
           </p>
         </div>
-        <button
-          onClick={() => load(true)}
-          disabled={refreshing}
+        <button onClick={handleRefresh} disabled={refreshing}
           className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all"
-          style={{
-            background: "rgba(129,140,248,0.1)",
-            border: "1px solid rgba(129,140,248,0.2)",
-            color: "#818cf8",
-            fontFamily: "monospace",
-          }}
-        >
+          style={{ background: "rgba(129,140,248,0.1)", border: "1px solid rgba(129,140,248,0.2)", color: "#818cf8", fontFamily: "monospace" }}>
           <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
           Refresh
         </button>
       </div>
 
-      {/* ── Error ── */}
+      {/* Error */}
       {error && (
         <div className="rounded-xl px-4 py-3 text-sm flex items-center gap-3"
           style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171", fontFamily: "monospace" }}>
@@ -313,52 +333,30 @@ export default function AdminAnalyticsPage() {
         </div>
       )}
 
-      {/* ── KPIs ── */}
+      {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPI
-          label="Monthly Revenue"
-          value={loading ? "—" : totalMrr.toLocaleString("fr-DZ")}
-          suffix="DZD"
-          trend={mrrGrowth}
-          icon={<DollarSign size={16} />}
-          loading={loading}
-          accent="#c084fc"
-        />
-        <KPI
-          label="Total Companies"
-          value={loading ? "—" : stats?.companies?.total ?? "—"}
-          trend={stats?.companies?.growth_percentage}
-          icon={<Building2 size={16} />}
-          loading={loading}
-          accent="#818cf8"
-        />
-        <KPI
-          label="Total Users"
-          value={loading ? "—" : stats?.users?.total ?? "—"}
-          icon={<Users size={16} />}
-          loading={loading}
-          accent="#60a5fa"
-        />
-        <KPI
-          label="Active Contracts"
-          value={loading ? "—" : stats?.contracts?.active ?? "—"}
-          icon={<FileText size={16} />}
-          loading={loading}
-          accent="#34d399"
-        />
+        <KPI label="Monthly Revenue" value={loading ? "—" : totalMrr.toLocaleString("fr-DZ")} suffix="DZD"
+          trend={mrrGrowth} icon={<DollarSign size={16} />} loading={loading} accent="#c084fc" />
+        <KPI label="Total Companies" value={loading ? "—" : stats?.companies?.total ?? "—"}
+          trend={stats?.companies?.growth_percentage} icon={<Building2 size={16} />} loading={loading} accent="#818cf8" />
+        <KPI label="Total Users" value={loading ? "—" : stats?.users?.total ?? "—"}
+          icon={<Users size={16} />} loading={loading} accent="#60a5fa" />
+        <KPI label="Active Contracts" value={loading ? "—" : stats?.contracts?.active ?? "—"}
+          icon={<FileText size={16} />} loading={loading} accent="#34d399" />
       </div>
 
-      {/* ── Sub-stats strip ── */}
+      {/* Sub-stats */}
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
         {[
-          { label: "Active", value: stats?.companies?.active ?? "—", color: "#34d399" },
-          { label: "Trial", value: stats?.companies?.trial ?? "—", color: "#fbbf24" },
-          { label: "Suspended", value: stats?.companies?.suspended ?? "—", color: "#f87171" },
-          { label: "New This Month", value: stats?.companies?.new_this_month ?? "—", color: "#818cf8" },
-          { label: "Total Vehicles", value: stats?.vehicles?.total ?? "—", color: "#60a5fa" },
-          { label: "Total Contracts", value: stats?.contracts?.total ?? "—", color: "#c084fc" },
+          { label: "Active",        value: stats?.companies?.active ?? "—",       color: "#34d399" },
+          { label: "Trial",         value: stats?.companies?.trial ?? "—",        color: "#fbbf24" },
+          { label: "Suspended",     value: stats?.companies?.suspended ?? "—",    color: "#f87171" },
+          { label: "New This Month",value: stats?.companies?.new_this_month ?? "—", color: "#818cf8" },
+          { label: "Total Vehicles",value: stats?.vehicles?.total ?? "—",         color: "#60a5fa" },
+          { label: "Total Contracts",value: stats?.contracts?.total ?? "—",       color: "#c084fc" },
         ].map(({ label, value, color }) => (
-          <div key={label} className="rounded-xl p-3 text-center" style={{ background: "#080810", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <div key={label} className="rounded-xl p-3 text-center"
+            style={{ background: "#080810", border: "1px solid rgba(255,255,255,0.06)" }}>
             {loading ? <Skeleton className="h-6 w-12 mx-auto mb-1" /> : (
               <p className="text-xl font-black" style={{ color, fontFamily: "monospace" }}>{value}</p>
             )}
@@ -367,9 +365,8 @@ export default function AdminAnalyticsPage() {
         ))}
       </div>
 
-      {/* ── Charts Row ── */}
+      {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-
         {/* MRR Trend */}
         <div className="rounded-2xl p-5" style={{ background: "#080810", border: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="flex items-center justify-between mb-1">
@@ -382,16 +379,13 @@ export default function AdminAnalyticsPage() {
             )}
           </div>
           <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.25)", fontFamily: "monospace" }}>Last 6 months · DZD</p>
-
           {loading ? <Skeleton className="h-24 w-full" /> : (
             mrrValues.some(v => v > 0)
               ? <Sparkline data={mrrValues} color="#c084fc" />
               : <div className="h-24 flex items-center justify-center">
-                <p className="text-xs" style={{ color: "rgba(255,255,255,0.2)", fontFamily: "monospace" }}>No revenue data yet</p>
-              </div>
+                  <p className="text-xs" style={{ color: "rgba(255,255,255,0.2)", fontFamily: "monospace" }}>No revenue data yet</p>
+                </div>
           )}
-
-          {/* Month labels */}
           {!loading && growth.length > 0 && (
             <div className="mt-3 grid gap-0" style={{ gridTemplateColumns: `repeat(${growth.length}, 1fr)` }}>
               {growth.map((g, i) => (
@@ -406,19 +400,17 @@ export default function AdminAnalyticsPage() {
           )}
         </div>
 
-        {/* New Companies per Month */}
+        {/* New Companies */}
         <div className="rounded-2xl p-5" style={{ background: "#080810", border: "1px solid rgba(255,255,255,0.07)" }}>
           <h3 className="text-sm font-bold text-white mb-1" style={{ fontFamily: "monospace" }}>New Companies</h3>
           <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.25)", fontFamily: "monospace" }}>Monthly signups</p>
-
           {loading ? <Skeleton className="h-24 w-full" /> : (
             newCompanyBars.some(b => b.value > 0)
               ? <BarChart data={newCompanyBars} color="#818cf8" />
               : <div className="h-24 flex items-center justify-center">
-                <p className="text-xs" style={{ color: "rgba(255,255,255,0.2)", fontFamily: "monospace" }}>No signups in range</p>
-              </div>
+                  <p className="text-xs" style={{ color: "rgba(255,255,255,0.2)", fontFamily: "monospace" }}>No signups in range</p>
+                </div>
           )}
-
           {!loading && growth.length > 0 && (
             <div className="mt-4 flex items-center justify-between px-1">
               <div>
@@ -438,43 +430,33 @@ export default function AdminAnalyticsPage() {
         </div>
       </div>
 
-      {/* ── Feature Adoption + Revenue by Plan ── */}
+      {/* Feature Adoption + Revenue by Plan */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-
         {/* Feature Adoption */}
         <div className="rounded-2xl p-5" style={{ background: "#080810", border: "1px solid rgba(255,255,255,0.07)" }}>
           <div className="flex items-center gap-2 mb-5">
             <Zap size={14} style={{ color: "#818cf8" }} />
             <h3 className="text-sm font-bold text-white" style={{ fontFamily: "monospace" }}>Feature Adoption</h3>
           </div>
-
           {loading ? (
             <div className="space-y-5">{Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-10" />)}</div>
           ) : features.length > 0 ? (
             <div className="space-y-4">
               {features.map((f, i) => {
-                const colors = ["#818cf8", "#c084fc", "#60a5fa", "#34d399", "#fbbf24"]
+                const colors = ["#818cf8","#c084fc","#60a5fa","#34d399","#fbbf24"]
                 const color = colors[i % colors.length]
                 return (
                   <div key={f.name}>
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.6)", fontFamily: "monospace" }}>
-                        {f.name}
-                      </span>
+                      <span className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.6)", fontFamily: "monospace" }}>{f.name}</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs" style={{ color: "rgba(255,255,255,0.25)", fontFamily: "monospace" }}>
-                          {f.companies} co.
-                        </span>
-                        <span className="text-xs font-bold px-1.5 py-0.5 rounded" style={{ background: `${color}18`, color, fontFamily: "monospace" }}>
-                          {f.adoption}%
-                        </span>
+                        <span className="text-xs" style={{ color: "rgba(255,255,255,0.25)", fontFamily: "monospace" }}>{f.companies} co.</span>
+                        <span className="text-xs font-bold px-1.5 py-0.5 rounded" style={{ background: `${color}18`, color, fontFamily: "monospace" }}>{f.adoption}%</span>
                       </div>
                     </div>
                     <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.05)" }}>
-                      <div
-                        className="h-full rounded-full transition-all duration-1000"
-                        style={{ width: `${f.adoption}%`, background: `linear-gradient(90deg, ${color}88, ${color})` }}
-                      />
+                      <div className="h-full rounded-full transition-all duration-1000"
+                        style={{ width: `${f.adoption}%`, background: `linear-gradient(90deg, ${color}88, ${color})` }} />
                     </div>
                   </div>
                 )
@@ -491,16 +473,11 @@ export default function AdminAnalyticsPage() {
             <TrendingUp size={14} style={{ color: "#c084fc" }} />
             <h3 className="text-sm font-bold text-white" style={{ fontFamily: "monospace" }}>Revenue by Plan</h3>
           </div>
-
           {loading ? (
             <div className="space-y-4">{Array(3).fill(0).map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
           ) : revenueByPlan.length > 0 ? (
             <div className="flex items-center gap-6">
-              {/* Donut */}
-              <div className="shrink-0">
-                <DonutChart segments={donutSegments} />
-              </div>
-              {/* Breakdown */}
+              <div className="shrink-0"><DonutChart segments={donutSegments} /></div>
               <div className="flex-1 space-y-3">
                 {revenueByPlan.map((p) => {
                   const color = planColors[p.plan] || "#9ca3af"
@@ -509,9 +486,7 @@ export default function AdminAnalyticsPage() {
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-2">
                           <div className="w-2 h-2 rounded-full" style={{ background: color }} />
-                          <span className="text-xs font-bold uppercase tracking-wider" style={{ color, fontFamily: "monospace" }}>
-                            {p.plan}
-                          </span>
+                          <span className="text-xs font-bold uppercase tracking-wider" style={{ color, fontFamily: "monospace" }}>{p.plan}</span>
                         </div>
                         <span className="text-xs font-bold text-white" style={{ fontFamily: "monospace" }}>
                           {Number(p.total_mrr).toLocaleString("fr-DZ")} DZD
@@ -534,30 +509,37 @@ export default function AdminAnalyticsPage() {
         </div>
       </div>
 
-      {/* ── System Health ── */}
+      {/* ── System Health — LIVE DATA ─────────────────────────────────────── */}
       <div className="rounded-2xl p-5" style={{ background: "#080810", border: "1px solid rgba(255,255,255,0.07)" }}>
         <div className="flex items-center gap-2 mb-5">
           <Activity size={14} style={{ color: "#34d399" }} />
           <h3 className="text-sm font-bold text-white" style={{ fontFamily: "monospace" }}>System Health</h3>
-          <div className="ml-auto flex items-center gap-1.5">
-            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#34d399" }} />
-            <span className="text-xs" style={{ color: "#34d399", fontFamily: "monospace" }}>All systems operational</span>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: "Churn Rate", value: "2.5%", note: "30-day rolling", good: true },
-            { label: "Platform Uptime", value: "99.98%", note: "This month", good: true },
-            { label: "Avg Response Time", value: "245ms", note: "All API endpoints", good: false },
-            { label: "API Calls / Month", value: "1.28M", note: "Total platform", good: false },
-          ].map(({ label, value, note, good }) => (
-            <div key={label} className="rounded-xl p-4" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
-              <p className="text-xs mb-2" style={{ color: "rgba(255,255,255,0.25)", fontFamily: "monospace" }}>{label}</p>
-              <p className="text-2xl font-black text-white mb-1" style={{ fontFamily: "'DM Mono', monospace" }}>{value}</p>
-              <p className="text-xs" style={{ color: good ? "#34d399" : "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>{note}</p>
+          {!healthLoading && health && (
+            <div className="ml-auto flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full animate-pulse"
+                style={{ background: (health.churn_rate ?? 0) <= 5 ? "#34d399" : "#fbbf24" }} />
+              <span className="text-xs" style={{
+                color: (health.churn_rate ?? 0) <= 5 ? "#34d399" : "#fbbf24",
+                fontFamily: "monospace"
+              }}>
+                {(health.churn_rate ?? 0) <= 5 ? "Healthy" : "Needs attention"}
+              </span>
             </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          {healthCards.map(card => (
+            <HealthCard key={card.label} {...card} loading={healthLoading} />
           ))}
         </div>
+
+        {/* Last updated note */}
+        {!healthLoading && (
+          <p className="text-xs mt-4" style={{ color: "rgba(255,255,255,0.15)", fontFamily: "monospace" }}>
+            📊 Live data · 30-day rolling window · Last refreshed {new Date().toLocaleTimeString()}
+          </p>
+        )}
       </div>
     </div>
   )

@@ -1,0 +1,54 @@
+-- scripts/fixCompanyLocations.sql
+--
+-- Run this once to fix the encoding issue in your seeded companies
+-- and backfill the settings->wilaya / settings->commune fields
+-- so the location filter works immediately.
+--
+-- Usage:
+--   psql $DATABASE_URL -f scripts/fixCompanyLocations.sql
+-- OR paste directly into psql
+
+-- ── Fix Mazloug companies ─────────────────────────────────────────────────────
+UPDATE companies
+SET
+  address  = '187 Rue de l''Indépendance, Mazloug, Wilaya de Sétif',
+  settings = settings
+    || '{"wilaya": "Sétif", "wilaya_id": "19", "commune": "Mazloug", "commune_id": "19001"}'::jsonb
+WHERE name = 'Mazloug Auto Rental';
+
+UPDATE companies
+SET
+  address  = '101 Rue de l''Indépendance, Mazloug, Wilaya de Sétif, Algérie',
+  settings = settings
+    || '{"wilaya": "Sétif", "wilaya_id": "19", "commune": "Mazloug", "commune_id": "19001"}'::jsonb
+WHERE name = 'Mazloug Car Rental';
+
+-- ── Fix other seeded companies with known locations ───────────────────────────
+UPDATE companies
+SET settings = settings
+  || '{"wilaya": "Oran", "wilaya_id": "31", "commune": "Oran", "commune_id": "31001"}'::jsonb
+WHERE name = 'Speed Motors Oran';
+
+UPDATE companies
+SET settings = settings
+  || '{"wilaya": "Constantine", "wilaya_id": "25", "commune": "Constantine", "commune_id": "25001"}'::jsonb
+WHERE name = 'Constantine Premium Cars';
+
+UPDATE companies
+SET settings = settings
+  || '{"wilaya": "Algiers", "wilaya_id": "16", "commune": "Algiers", "commune_id": "16001"}'::jsonb
+WHERE name = 'Elite Car Rental';
+
+UPDATE companies
+SET settings = settings
+  || '{"wilaya": "Algiers", "wilaya_id": "16", "commune": "Algiers", "commune_id": "16001"}'::jsonb
+WHERE name = 'Algiers Premium Rentals';
+
+-- ── Verify ────────────────────────────────────────────────────────────────────
+SELECT
+  name,
+  LEFT(address, 50) AS address_preview,
+  settings->>'wilaya'  AS wilaya,
+  settings->>'commune' AS commune
+FROM companies
+ORDER BY name;

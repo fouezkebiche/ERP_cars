@@ -13,6 +13,7 @@ const Employee = require('./Employee');
 const Notification = require('./Notification');
 const Attendance = require('./Attendance');
 const { Payroll } = require('./Payroll');
+const PlatformSettings = require('./PlatformSettings');
 
 // ============================================
 // COMPANY RELATIONSHIPS
@@ -126,4 +127,5 @@ module.exports = {
   Notification,
   Attendance,
   Payroll,
+  PlatformSettings,
 };

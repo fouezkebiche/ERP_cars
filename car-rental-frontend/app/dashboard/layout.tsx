@@ -76,15 +76,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       permissions: ["view_analytics"],
     },
     // ============================================
-    // NEW: REPORTS NAVIGATION ITEM
-    // ============================================
-    {
-      label: "Reports",
-      href: "/dashboard/reports",
-      icon: <FileBarChart className="w-5 h-5" />,
-      roles: ["owner", "admin", "manager"],
-    },
-    // ============================================
     {
       label: "HR & Employees",
       href: "/dashboard/hr",
