@@ -20,6 +20,7 @@ const notificationsRoutes = require('./routes/notifications.routes');
 const attendanceRoutes = require('./routes/attendance.routes');
 const payrollRoutes = require('./routes/payroll.routes');
 const adminRoutes = require('./routes/admin.routes');
+const adminController = require('./controllers/admin.controller');
 
 const app = express();
 
@@ -67,6 +68,8 @@ app.get('/api/ping', (req, res) => {
 // API ROUTES
 // ============================================
 
+// Public pricing endpoint (no authentication required)
+app.get('/api/pricing/plans', adminController.getPricingPlans);
 
 console.log({
   authRoutes: typeof authRoutes,

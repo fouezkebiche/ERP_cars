@@ -1,7 +1,7 @@
 // components/dashboard/OverageCalculator.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -28,6 +28,12 @@ export function OverageCalculator({
   const [estimate, setEstimate] = useState<OverageEstimate | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const onEstimateChangeRef = useRef(onEstimateChange)
+  
+  // Update ref when callback changes
+  useEffect(() => {
+    onEstimateChangeRef.current = onEstimateChange
+  }, [onEstimateChange])
 
   useEffect(() => {
     const fetchEstimate = async () => {
@@ -35,7 +41,7 @@ export function OverageCalculator({
       
       if (!endMileage || isNaN(endMileageNum) || endMileageNum <= startMileage) {
         setEstimate(null)
-        onEstimateChange?.(null)
+        onEstimateChangeRef.current?.(null)
         return
       }
 
@@ -44,19 +50,19 @@ export function OverageCalculator({
         setError(null)
         const response = await contractApi.estimateOverage(contractId, endMileageNum)
         setEstimate(response.data)
-        onEstimateChange?.(response.data)
+        onEstimateChangeRef.current?.(response.data)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to calculate estimate')
         setEstimate(null)
-        onEstimateChange?.(null)
+        onEstimateChangeRef.current?.(null)
       } finally {
         setLoading(false)
       }
     }
 
-    const debounce = setTimeout(fetchEstimate, 500)
+    const debounce = setTimeout(fetchEstimate, 1000)
     return () => clearTimeout(debounce)
-  }, [endMileage, contractId, startMileage, onEstimateChange])
+  }, [endMileage, contractId, startMileage])
 
   const kmDriven = estimate?.estimated_km_driven || 0
   const kmOverage = estimate?.estimated_overage.km_overage || 0

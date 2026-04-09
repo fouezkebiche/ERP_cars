@@ -1,25 +1,28 @@
 "use client"
 
 import { usePathname } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { Menu, RefreshCw, Bell, LogOut } from "lucide-react"
 import { useAuth } from "@/context/AuthContext"
-
-const PAGE_META: Record<string, { title: string; subtitle: string }> = {
-  "/admin": { title: "Platform Overview", subtitle: "Monitor all companies & platform health" },
-  "/admin/companies": { title: "Companies", subtitle: "Manage tenant companies and subscriptions" },
-  "/admin/users": { title: "Users", subtitle: "All users across the platform" },
-  "/admin/analytics": { title: "Analytics", subtitle: "Platform growth & revenue insights" },
-  "/admin/settings": { title: "Settings", subtitle: "Platform configuration" },
-}
 
 interface Props {
   onMenuClick: () => void
 }
 
 export function AdminTopbar({ onMenuClick }: Props) {
+  const t = useTranslations("admin")
   const pathname = usePathname()
-  const meta = PAGE_META[pathname] || { title: "Admin", subtitle: "" }
   const { logout } = useAuth()
+
+  const PAGE_META: Record<string, { title: string; subtitle: string }> = {
+    "/admin": { title: t("platformOverview"), subtitle: t("platformOverviewSubtitle") },
+    "/admin/companies": { title: t("companies"), subtitle: t("companiesSubtitle") },
+    "/admin/users": { title: t("users"), subtitle: t("usersSubtitle") },
+    "/admin/analytics": { title: t("analytics"), subtitle: t("analyticsSubtitle") },
+    "/admin/settings": { title: t("settings"), subtitle: t("settingsSubtitle") },
+  }
+
+  const meta = PAGE_META[pathname] || { title: "Admin", subtitle: "" }
 
   return (
     <header
@@ -53,17 +56,11 @@ export function AdminTopbar({ onMenuClick }: Props) {
         <button
           onClick={() => window.location.reload()}
           className="p-1.5 rounded-md transition-colors hover:bg-white/5"
-          title="Refresh"
+          title={t("refresh")}
         >
           <RefreshCw size={16} style={{ color: "rgba(255,255,255,0.4)" }} />
         </button>
-        <button className="relative p-1.5 rounded-md transition-colors hover:bg-white/5">
-          <Bell size={16} style={{ color: "rgba(255,255,255,0.4)" }} />
-          <span
-            className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full"
-            style={{ background: "#c084fc" }}
-          />
-        </button>
+        
         <button
           onClick={logout}
           className="p-1.5 rounded-md transition-colors hover:bg-white/5"
@@ -71,12 +68,7 @@ export function AdminTopbar({ onMenuClick }: Props) {
         >
           <LogOut size={16} style={{ color: "rgba(255,255,255,0.4)" }} />
         </button>
-        <div
-          className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ml-2"
-          style={{ background: "linear-gradient(135deg, #c084fc, #818cf8)", color: "white", fontFamily: "monospace" }}
-        >
-          SA
-        </div>
+        
       </div>
     </header>
   )

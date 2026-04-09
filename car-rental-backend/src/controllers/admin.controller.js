@@ -779,6 +779,29 @@ module.exports = {
   getFeatureUsage,
   getTrendingVehicles,
   getSystemHealth,
+  // Public pricing plans endpoint (no authentication required)
+  async getPricingPlans(req, res) {
+    try {
+      let row = await PlatformSettings.findByPk(1);
+      if (!row) {
+        row = await PlatformSettings.create({ id: 1, settings: {} });
+      }
+
+      const plans = row.settings?.plans || [];
+      
+      sendSuccess(res, {
+        message: 'Pricing plans fetched successfully',
+        data: { plans },
+      });
+    } catch (error) {
+      console.error('💥 Get pricing plans error:', error);
+      sendError(res, {
+        statusCode: 500,
+        message: 'Failed to fetch pricing plans',
+        details: error.message,
+      });
+    }
+  },
   // Superadmin platform-wide settings (single row in platform_settings)
   async getAdminSettings(req, res) {
     try {

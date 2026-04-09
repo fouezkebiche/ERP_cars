@@ -216,7 +216,35 @@ async function apiFetch<T>(path: string, queryParams?: Record<string, any>): Pro
   }
 
   const json = await response.json()
-  return json.data as T
+  console.log('🔍 API Response:', json) // Debug log
+  console.log('🔍 Data object:', json.data) // Debug the data object
+  
+  // Handle different response formats from backend
+  if (json.data?.data) {
+    console.log('📊 Using nested data format')
+    return json.data.data as T  // Nested: { data: { data: {...} } }
+  } else if (json.data?.period) {
+    console.log('📊 Using direct data format')
+    console.log('📊 Period:', json.data.period)
+    console.log('📊 Total Revenue:', json.data.total_revenue)
+    
+    // Handle revenue comparison format
+    if (json.data.current_period) {
+      console.log('📊 Using revenue comparison format')
+      return {
+        ...json.data.current_period,
+        period: json.data.period,
+        previous_period: json.data.previous_period,
+        growth_percentage: json.data.growth_percentage,
+      } as T
+    }
+    
+    return json.data as T     // Direct: { data: { period: {...}, ... } }
+  } else {
+    console.log('📊 Using fallback data format')
+    console.log('📊 Data keys:', Object.keys(json.data || {}))
+    return json.data as T        // Fallback
+  }
 }
 
 // ────────────────────────────────────────────────
