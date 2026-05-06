@@ -1,81 +1,183 @@
-// app/[locale]/dashboard/settings/page.tsx (FULLY LOCALIZED)
+// app/[locale]/dashboard/settings/page.tsx
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Save, Upload, Bell, X, MapPin } from "lucide-react"
+import { Save, Bell, X } from "lucide-react"
 import toast from "react-hot-toast"
 import { useNotifications } from "@/hooks/useNotifications"
 import { useTranslations } from "next-intl"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface Wilaya {
-  id: string
-  code: string
-  name: string
-  ar_name: string
-  longitude: string
-  latitude: string
-}
+// ── Design tokens ────────────────────────────────────────────────────────────
+const SURFACE      = 'rgba(255,255,255,0.04)'
+const SURFACE2     = 'rgba(255,255,255,0.07)'
+const BORDER_COLOR = 'rgba(255,255,255,0.07)'
+const GREEN        = '#22C55E'
+const MUTED        = 'rgba(255,255,255,0.4)'
+const TEXT         = '#FFFFFF'
+const FONT         = "'Plus Jakarta Sans', system-ui, sans-serif"
 
-interface Commune {
-  id: string
-  post_code: string
-  name: string
-  wilaya_id: string
-  ar_name: string
-  longitude: string
-  latitude: string
-}
+const globalStyle = `
+  @keyframes _spin { to { transform: rotate(360deg); } }
+  select option { background: #0D1117 !important; color: #FFFFFF !important; }
+`
 
+// ── Types ────────────────────────────────────────────────────────────────────
+interface Wilaya  { id: string; code: string; name: string; ar_name: string; longitude: string; latitude: string }
+interface Commune { id: string; post_code: string; name: string; wilaya_id: string; ar_name: string; longitude: string; latitude: string }
 interface Settings {
-  theme?: string
-  notificationsEnabled?: boolean
-  defaultDailyKmLimit?: number
-  defaultOverageRate?: number
-  wilaya?: string
-  wilaya_id?: string
-  commune?: string
-  commune_id?: string
+  theme?: string; notificationsEnabled?: boolean
+  defaultDailyKmLimit?: number; defaultOverageRate?: number
+  wilaya?: string; wilaya_id?: string; commune?: string; commune_id?: string
   [key: string]: any
 }
 
-// ─── Settings Page ────────────────────────────────────────────────────────────
+// ── Shared primitives ────────────────────────────────────────────────────────
+function SectionCard({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div style={{ background: SURFACE, border: `1px solid ${BORDER_COLOR}`, borderRadius: 12, padding: 24 }}>
+      <h3 style={{ fontSize: 15, fontWeight: 600, color: TEXT, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {title}
+      </h3>
+      {children}
+    </div>
+  )
+}
+
+function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: React.ReactNode }) {
+  return (
+    <label htmlFor={htmlFor} style={{
+      display: 'block', fontSize: 12, fontWeight: 500, color: MUTED,
+      marginBottom: 6, fontFamily: FONT,
+      textTransform: 'uppercase', letterSpacing: '0.06em',
+    }}>
+      {children}
+    </label>
+  )
+}
+
+function StyledInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  const { style, ...rest } = props
+  return (
+    <input
+      {...rest}
+      style={{
+        width: '100%', padding: '9px 12px', borderRadius: 8,
+        borderWidth: 1, borderStyle: 'solid', borderColor: BORDER_COLOR,
+        background: SURFACE2, color: TEXT, fontFamily: FONT, fontSize: 13,
+        outline: 'none', boxSizing: 'border-box', ...style,
+      }}
+      onFocus={e => { e.currentTarget.style.borderColor = GREEN; e.currentTarget.style.boxShadow = `0 0 0 2px ${GREEN}22` }}
+      onBlur={e => { e.currentTarget.style.borderColor = BORDER_COLOR; e.currentTarget.style.boxShadow = 'none' }}
+    />
+  )
+}
+
+function StyledSelect(props: React.SelectHTMLAttributes<HTMLSelectElement> & { onChange?: (e: React.ChangeEvent<HTMLSelectElement>) => void }) {
+  const { style, ...rest } = props
+  return (
+    <select
+      {...rest}
+      style={{
+        width: '100%', padding: '9px 12px', borderRadius: 8,
+        borderWidth: 1, borderStyle: 'solid',
+        borderColor: props.disabled ? `${BORDER_COLOR}` : BORDER_COLOR,
+        background: props.disabled ? 'rgba(255,255,255,0.02)' : '#0D1117',
+        color: props.disabled ? MUTED : TEXT,
+        fontFamily: FONT, fontSize: 13,
+        outline: 'none', cursor: props.disabled ? 'not-allowed' : 'pointer',
+        colorScheme: 'dark',
+        ...style,
+      } as React.CSSProperties}
+      onFocus={e => { if (!props.disabled) { e.currentTarget.style.borderColor = GREEN; e.currentTarget.style.boxShadow = `0 0 0 2px ${GREEN}22` } }}
+      onBlur={e => { e.currentTarget.style.borderColor = BORDER_COLOR; e.currentTarget.style.boxShadow = 'none' }}
+    />
+  )
+}
+
+function SaveBtn({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 8,
+        padding: '10px 22px', borderRadius: 8, border: 'none',
+        background: disabled ? BORDER_COLOR : GREEN,
+        color: disabled ? MUTED : '#000',
+        fontFamily: FONT, fontSize: 14, fontWeight: 600,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        boxShadow: disabled ? 'none' : `0 0 14px ${GREEN}44`,
+        transition: 'all 0.15s',
+      }}
+      onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = '#16a34a' }}
+      onMouseLeave={e => { if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = disabled ? BORDER_COLOR : GREEN }}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ── Checkbox row ─────────────────────────────────────────────────────────────
+function CheckRow({ label, description }: { label: string; description: string }) {
+  const [checked, setChecked] = useState(true)
+  return (
+    <label
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 12, padding: 14,
+        borderRadius: 10, border: `1px solid ${checked ? GREEN + '33' : BORDER_COLOR}`,
+        background: checked ? `${GREEN}08` : SURFACE,
+        cursor: 'pointer', transition: 'all 0.15s',
+      }}
+    >
+      {/* Custom checkbox */}
+      <div
+        onClick={() => setChecked(v => !v)}
+        style={{
+          width: 18, height: 18, borderRadius: 5, flexShrink: 0, marginTop: 1,
+          borderWidth: 2, borderStyle: 'solid',
+          borderColor: checked ? GREEN : BORDER_COLOR,
+          background: checked ? GREEN : 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'all 0.15s',
+        }}
+      >
+        {checked && (
+          <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+            <path d="M1 4L3.5 6.5L9 1" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+      <div>
+        <p style={{ fontSize: 13, fontWeight: 600, color: TEXT, margin: 0 }}>{label}</p>
+        <p style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>{description}</p>
+      </div>
+    </label>
+  )
+}
+
+// ============================================================================
+// MAIN PAGE
+// ============================================================================
 export default function SettingsPage() {
   const t = useTranslations("settings")
   const router = useRouter()
   const [activeTab, setActiveTab] = useState("company")
   const [isLoading, setIsLoading] = useState(false)
 
-  // ── Company profile form ──
   const [formData, setFormData] = useState({
-    name: "",
-    address: "",
-    phone: "",
-    email: "",
-    taxId: "",
-    logoUrl: "",
+    name: "", address: "", phone: "", email: "", taxId: "", logoUrl: "",
   })
-
-  // ── Company settings (stored in company.settings JSON) ──
   const [settingsData, setSettingsData] = useState<Settings>({})
-
-  const [token, setToken] = useState<string | null>(
+  const [token] = useState<string | null>(
     typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
   )
-
-  // ── Algeria geo data from /public ──
-  const [wilayas, setWilayas]     = useState<Wilaya[]>([])
-  const [communes, setCommunes]   = useState<Commune[]>([])
+  const [wilayas, setWilayas]   = useState<Wilaya[]>([])
+  const [communes, setCommunes] = useState<Commune[]>([])
   const [geoLoading, setGeoLoading] = useState(true)
-
-  // UI selections (may differ from what's saved until Save is clicked)
   const [selectedWilayaId, setSelectedWilayaId] = useState("")
 
   const { data: notificationsData, dismissNotification } = useNotifications({
@@ -83,22 +185,15 @@ export default function SettingsPage() {
   })
   const criticalNotifications = notificationsData?.notifications || []
 
-  // ── Load wilaya + commune JSON from /public on mount ──────────────────────
   useEffect(() => {
     async function loadGeoData() {
       try {
-        const [wRes, cRes] = await Promise.all([
-          fetch("/Wilaya_Of_Algeria.json"),
-          fetch("/Commune_Of_Algeria.json"),
-        ])
+        const [wRes, cRes] = await Promise.all([fetch("/Wilaya_Of_Algeria.json"), fetch("/Commune_Of_Algeria.json")])
         if (!wRes.ok || !cRes.ok) throw new Error("Could not load geo data files")
-        const [wData, cData]: [Wilaya[], Commune[]] = await Promise.all([
-          wRes.json(), cRes.json(),
-        ])
+        const [wData, cData]: [Wilaya[], Commune[]] = await Promise.all([wRes.json(), cRes.json()])
         setWilayas(wData.sort((a, b) => parseInt(a.id) - parseInt(b.id)))
         setCommunes(cData)
       } catch (e) {
-        console.error("Failed to load Algeria geo data:", e)
         toast.error("Could not load wilaya/commune data")
       } finally {
         setGeoLoading(false)
@@ -107,438 +202,345 @@ export default function SettingsPage() {
     loadGeoData()
   }, [])
 
-  // ── Load company profile + settings on mount ───────────────────────────────
   useEffect(() => {
     if (!token) return
     async function loadCompanyData() {
       try {
-        const res = await fetch(`${API_URL}/api/company/profile`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
+        const res = await fetch(`${API_URL}/api/company/profile`, { headers: { Authorization: `Bearer ${token}` } })
         if (!res.ok) throw new Error("Failed to load company profile")
         const response = await res.json()
-        const data = response.data?.company || response.data || {} // Handle nested response
-        console.log('🔍 Loaded company data:', data)
-        setFormData({
-          name: data.name || "",
-          address: data.address || "",
-          phone: data.phone || "",
-          email: data.email || "",
-          taxId: data.tax_id || "",
-          logoUrl: data.logo_url || "",
-        })
-        // Settings stored in JSON column
+        const data = response.data?.company || response.data || {}
+        setFormData({ name: data.name || "", address: data.address || "", phone: data.phone || "", email: data.email || "", taxId: data.tax_id || "", logoUrl: data.logo_url || "" })
         setSettingsData(data.settings || {})
-        // Set UI selections from saved data
-        if (data.settings?.wilaya_id) {
-          setSelectedWilayaId(data.settings.wilaya_id)
-        }
+        if (data.settings?.wilaya_id) setSelectedWilayaId(data.settings.wilaya_id)
       } catch (e) {
-        console.error("Failed to load company profile:", e)
         toast.error("Could not load company profile")
       }
     }
     loadCompanyData()
   }, [token])
 
-  // ── When a wilaya is selected, filter communes ───────────────────────────
-  const filteredCommunes = selectedWilayaId
-    ? communes.filter((c) => c.wilaya_id === selectedWilayaId)
-    : []
+  const filteredCommunes = selectedWilayaId ? communes.filter(c => c.wilaya_id === selectedWilayaId) : []
 
-  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleProfileChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
+    setFormData(prev => ({ ...prev, [name]: value }))
   }
 
   const handleSettingsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
-    setSettingsData((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? (e.target as HTMLInputElement).checked : value,
-    }))
+    setSettingsData(prev => ({ ...prev, [name]: type === "checkbox" ? (e.target as HTMLInputElement).checked : value }))
   }
 
   const handleSaveProfile = async () => {
     if (!token) return
     setIsLoading(true)
     try {
-      console.log('🔍 Saving profile data:', formData)
       const res = await fetch(`${API_URL}/api/company/profile`, {
-        method: "PUT", // Changed from PATCH to PUT to match backend
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(formData),
       })
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}))
-        console.error('❌ Save profile error:', errorData)
-        throw new Error(errorData.message || "Failed to save company profile")
-      }
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || "Failed") }
       toast.success(t("profileSaved"))
-    } catch (e) {
-      console.error(e)
-      toast.error(t("failedToSaveProfile"))
-    } finally {
-      setIsLoading(false)
-    }
+    } catch (e) { toast.error(t("failedToSaveProfile")) }
+    finally { setIsLoading(false) }
   }
 
   const handleSaveSettings = async () => {
     if (!token) return
     setIsLoading(true)
     try {
-      // Build the settings object with selected wilaya/commune names + IDs
-      const selectedWilaya = wilayas.find((w) => w.id === selectedWilayaId)
-      const selectedCommune = filteredCommunes.find((c) => c.id === settingsData.commune_id)
-      const payload = {
-        ...settingsData,
-        wilaya: selectedWilaya?.name || "",
-        wilaya_id: selectedWilayaId || "",
-        commune: selectedCommune?.name || "",
-        commune_id: settingsData.commune_id || "",
-      }
+      const selectedWilaya  = wilayas.find(w => w.id === selectedWilayaId)
+      const selectedCommune = filteredCommunes.find(c => c.id === settingsData.commune_id)
+      const payload = { ...settingsData, wilaya: selectedWilaya?.name || "", wilaya_id: selectedWilayaId || "", commune: selectedCommune?.name || "", commune_id: settingsData.commune_id || "" }
       const res = await fetch(`${API_URL}/api/company/settings`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) throw new Error("Failed to save company settings")
+      if (!res.ok) throw new Error("Failed to save settings")
       setSettingsData(payload)
       toast.success(t("settingsSaved"))
-    } catch (e) {
-      console.error(e)
-      toast.error(t("failedToSaveSettings"))
-    } finally {
-      setIsLoading(false)
-    }
+    } catch (e) { toast.error(t("failedToSaveSettings")) }
+    finally { setIsLoading(false) }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const tabs = [
+    { id: "company",       label: t("companyProfile") },
+    { id: "settings",      label: t("companySettings") },
+    { id: "billing",       label: t("billing") },
+    { id: "notifications", label: t("notifications") },
+  ]
+
   return (
-    <div className="max-w-6xl mx-auto space-y-8 pb-20">
-      {/* Tab Navigation */}
-      <div className="flex border-b border-border">
-        {[
-          { id: "company", label: t("companyProfile") },
-          { id: "settings", label: t("companySettings") },
-          { id: "billing", label: t("billing") },
-          { id: "notifications", label: t("notifications") },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-6 py-3 font-medium border-b-2 transition-colors ${
-              activeTab === tab.id
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+    <>
+      <style>{globalStyle}</style>
+      <div style={{ maxWidth: 900, margin: '0 auto', paddingBottom: 80, fontFamily: FONT, color: TEXT, display: 'flex', flexDirection: 'column', gap: 32 }}>
 
-      {/* ── Company Profile tab ─────────────────────────────────────────────── */}
-      {activeTab === "company" && (
-        <div className="space-y-6">
-          <div className="p-6 rounded-lg border border-border bg-card">
-            <h3 className="font-semibold mb-4">{t("companyProfile")}</h3>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="name" className="block text-sm font-medium mb-2">
-                    {t("companyName")}
-                  </label>
-                  <Input
-                    id="name"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleProfileChange}
-                    placeholder="Your Company Name"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium mb-2">
-                    {t("companyEmail")}
-                  </label>
-                  <Input
-                    id="email"
-                    name="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={handleProfileChange}
-                    placeholder="contact@company.com"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="phone" className="block text-sm font-medium mb-2">
-                    {t("companyPhone")}
-                  </label>
-                  <Input
-                    id="phone"
-                    name="phone"
-                    value={formData.phone}
-                    onChange={handleProfileChange}
-                    placeholder="+213 XXX XXX XXX"
-                  />
-                </div>
-                
-              </div>
-              
-              
-            </div>
-          </div>
-
-          <Button
-            onClick={handleSaveProfile}
-            disabled={isLoading}
-            className="bg-primary hover:bg-primary/90"
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {isLoading ? t("saving") : t("saveProfile")}
-          </Button>
+        {/* ── Tab bar ─────────────────────────────────────────────────────── */}
+        <div style={{ display: 'flex', borderBottom: `1px solid ${BORDER_COLOR}`, overflowX: 'auto' }}>
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: '10px 22px',
+                background: 'transparent', border: 'none',
+                borderBottom: activeTab === tab.id ? `2px solid ${GREEN}` : '2px solid transparent',
+                color: activeTab === tab.id ? GREEN : MUTED,
+                fontFamily: FONT, fontSize: 14,
+                fontWeight: activeTab === tab.id ? 600 : 400,
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                transition: 'color 0.15s', marginBottom: -1,
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* ── Company Settings tab ─────────────────────────────────────────────── */}
-      {activeTab === "settings" && (
-        <div className="space-y-6">
-          {/* ── Location section ───────────────────────────────────── */}
-          <div className="p-6 rounded-lg border border-border bg-card">
-            <h3 className="font-semibold mb-4 flex items-center gap-2">
-              <span className="text-lg">📍</span>
-              {t("location")}
-            </h3>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="wilaya_id" className="block text-sm font-medium mb-2">
-                    {t("wilaya")}
-                  </label>
-                  <select
-                    id="wilaya_id"
-                    name="wilaya_id"
-                    value={selectedWilayaId}
-                    onChange={(e) => {
-                      setSelectedWilayaId(e.target.value)
-                      setSettingsData((prev) => ({ ...prev, commune_id: "" }))
-                    }}
-                    className="w-full px-3 py-2 border border-border rounded-md bg-background"
-                  >
-                    <option value="">{t("selectWilaya")}</option>
-                    {wilayas.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="commune_id" className="block text-sm font-medium mb-2">
-                    {t("commune")}
-                  </label>
-                  <select
-                    id="commune_id"
-                    name="commune_id"
-                    value={settingsData.commune_id || ""}
-                    onChange={handleSettingsChange}
-                    className="w-full px-3 py-2 border border-border rounded-md bg-background"
-                    disabled={!selectedWilayaId}
-                  >
-                    <option value="">{t("selectCommune")}</option>
-                    {filteredCommunes.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Missing location warning */}
-              {!settingsData.wilaya && (
-                <p className="mt-3 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                  <span>⚠️</span>
-                  {t("locationWarning")}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* ── Rental Policies section ───────────────────────────────────── */}
-          <div className="p-6 rounded-lg border border-border bg-card">
-            <h3 className="font-semibold mb-4 flex items-center gap-2">
-              <span className="text-lg">🚗</span>
-              {t("rentalPolicies")}
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="defaultDailyKmLimit" className="block text-sm font-medium mb-2">
-                  {t("defaultDailyKmLimit")} <span className="text-muted-foreground">({t("perDay")})</span>
-                </label>
-                <div className="flex items-center gap-3">
-                  <Input
-                    id="defaultDailyKmLimit"
-                    name="defaultDailyKmLimit"
-                    type="number"
-                    min="50"
-                    max="1000"
-                    step="50"
-                    value={settingsData.defaultDailyKmLimit ?? 300}
-                    onChange={handleSettingsChange}
-                    className="w-32"
-                  />
-                  <span className="text-sm text-muted-foreground">{t("kmPerDay")}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {t("kmLimitDescription")}
-                </p>
-              </div>
-
-              <div>
-                <label htmlFor="defaultOverageRate" className="block text-sm font-medium mb-2">
-                  {t("defaultOverageRate")} <span className="text-muted-foreground">({t("forNewCustomers")})</span>
-                </label>
-                <div className="flex items-center gap-3">
-                  <Input
-                    id="defaultOverageRate"
-                    name="defaultOverageRate"
-                    type="number"
-                    min="5"
-                    max="50"
-                    step="1"
-                    value={settingsData.defaultOverageRate ?? 20}
-                    onChange={handleSettingsChange}
-                    className="w-32"
-                  />
-                  <span className="text-sm text-muted-foreground">{t("daPerKm")}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {t("overageRateDescription")}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          
-
-          <Button
-            onClick={handleSaveSettings}
-            disabled={isLoading}
-            className="bg-primary hover:bg-primary/90"
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {isLoading ? t("saving") : t("saveSettings")}
-          </Button>
-        </div>
-      )}
-
-      {/* ── Billing tab ───────────────────────────────────────────────────── */}
-      {activeTab === "billing" && (
-        <div className="space-y-6">
-          <div className="p-6 rounded-lg border border-border bg-card">
-            <h3 className="font-semibold mb-4">{t("currentSubscription")}</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-muted-foreground">{t("plan")}</p>
-                <p className="font-semibold">Professional</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{t("billingCycle")}</p>
-                <p className="font-semibold">Monthly</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{t("amount")}</p>
-                <p className="font-semibold">15,000 DZD</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{t("renewalDate")}</p>
-                <p className="font-semibold">Feb 4, 2025</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Notifications tab ─────────────────────────────────────────────── */}
-      {activeTab === "notifications" && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">{t("notificationPreferences")}</h3>
-            <Button variant="outline" size="sm" onClick={() => router.push("/dashboard")}>
-              {t("viewAllInDashboard")}
-            </Button>
-          </div>
-
-          <div className="space-y-4">
-            {[
-              { label: t("newContractCreated"), description: t("newContractDesc") },
-              { label: t("paymentReceived"), description: t("paymentReceivedDesc") },
-              { label: t("maintenanceDue"), description: t("maintenanceDueDesc") },
-              { label: t("vehicleReturned"), description: t("vehicleReturnedDesc") },
-            ].map((notif, i) => (
-              <label
-                key={i}
-                className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card cursor-pointer hover:bg-muted"
-              >
-                <input type="checkbox" defaultChecked className="rounded" />
-                <div>
-                  <p className="font-semibold text-sm">{notif.label}</p>
-                  <p className="text-xs text-muted-foreground">{notif.description}</p>
-                </div>
-              </label>
-            ))}
-          </div>
-
-          {criticalNotifications.length > 0 && (
-            <div className="mt-6">
-              <h4 className="font-semibold mb-3 flex items-center gap-2">
-                <Bell className="w-4 h-4" />
-                {t("criticalAlerts")}
-              </h4>
-              <div className="space-y-3 max-h-48 overflow-y-auto">
-                {criticalNotifications.map(notif => (
-                  <div
-                    key={notif.id}
-                    className="p-3 rounded-lg border-l-4 border-l-destructive bg-destructive/5"
-                  >
-                    <div className="flex justify-between items-start gap-2">
-                      <div className="flex-1">
-                        <p className="font-semibold text-xs text-destructive mb-1">
-                          🚨 {notif.title}
-                        </p>
-                        <p className="text-xs text-muted-foreground mb-1">
-                          {notif.message.slice(0, 100)}...
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(notif.created_at).toLocaleDateString('fr-DZ')}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => dismissNotification(notif.id)}
-                        className="p-1 text-destructive hover:bg-destructive/20 rounded"
-                        title={t("dismiss")}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
+        {/* ── COMPANY PROFILE ─────────────────────────────────────────────── */}
+        {activeTab === "company" && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <SectionCard title={t("companyProfile")}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <FieldLabel htmlFor="name">{t("companyName")}</FieldLabel>
+                    <StyledInput id="name" name="name" value={formData.name} onChange={handleProfileChange} placeholder="Your Company Name" />
                   </div>
-                ))}
+                  <div>
+                    <FieldLabel htmlFor="email">{t("companyEmail")}</FieldLabel>
+                    <StyledInput id="email" name="email" type="email" value={formData.email} onChange={handleProfileChange} placeholder="contact@company.com" />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <FieldLabel htmlFor="phone">{t("companyPhone")}</FieldLabel>
+                    <StyledInput id="phone" name="phone" value={formData.phone} onChange={handleProfileChange} placeholder="+213 XXX XXX XXX" />
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            </SectionCard>
 
-    </div>
+            <div>
+              <SaveBtn onClick={handleSaveProfile} disabled={isLoading}>
+                <Save style={{ width: 15, height: 15 }} />
+                {isLoading ? t("saving") : t("saveProfile")}
+              </SaveBtn>
+            </div>
+          </div>
+        )}
+
+        {/* ── COMPANY SETTINGS ────────────────────────────────────────────── */}
+        {activeTab === "settings" && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+            {/* Location */}
+            <SectionCard title={<>📍 {t("location")}</>}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div>
+                    <FieldLabel htmlFor="wilaya_id">{t("wilaya")}</FieldLabel>
+                    <StyledSelect
+                      id="wilaya_id"
+                      name="wilaya_id"
+                      value={selectedWilayaId}
+                      onChange={e => {
+                        setSelectedWilayaId(e.target.value)
+                        setSettingsData(prev => ({ ...prev, commune_id: "" }))
+                      }}
+                    >
+                      <option value="">{t("selectWilaya")}</option>
+                      {wilayas.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    </StyledSelect>
+                  </div>
+                  <div>
+                    <FieldLabel htmlFor="commune_id">{t("commune")}</FieldLabel>
+                    <StyledSelect
+                      id="commune_id"
+                      name="commune_id"
+                      value={settingsData.commune_id || ""}
+                      onChange={handleSettingsChange}
+                      disabled={!selectedWilayaId}
+                    >
+                      <option value="">{t("selectCommune")}</option>
+                      {filteredCommunes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </StyledSelect>
+                  </div>
+                </div>
+
+                {!settingsData.wilaya && (
+                  <p style={{ fontSize: 12, color: '#F59E0B', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    ⚠️ {t("locationWarning")}
+                  </p>
+                )}
+              </div>
+            </SectionCard>
+
+            {/* Rental policies */}
+            <SectionCard title={<>🚗 {t("rentalPolicies")}</>}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Daily KM limit */}
+                <div>
+                  <FieldLabel htmlFor="defaultDailyKmLimit">
+                    {t("defaultDailyKmLimit")} <span style={{ color: MUTED, fontWeight: 400, textTransform: 'none' }}>({t("perDay")})</span>
+                  </FieldLabel>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <StyledInput
+                      id="defaultDailyKmLimit"
+                      name="defaultDailyKmLimit"
+                      type="number"
+                      min="50" max="1000" step="50"
+                      value={settingsData.defaultDailyKmLimit ?? 300}
+                      onChange={handleSettingsChange}
+                      style={{ width: 120 }}
+                    />
+                    <span style={{ fontSize: 13, color: MUTED }}>{t("kmPerDay")}</span>
+                  </div>
+                  <p style={{ fontSize: 12, color: MUTED, marginTop: 6 }}>{t("kmLimitDescription")}</p>
+                </div>
+
+                {/* Overage rate */}
+                <div>
+                  <FieldLabel htmlFor="defaultOverageRate">
+                    {t("defaultOverageRate")} <span style={{ color: MUTED, fontWeight: 400, textTransform: 'none' }}>({t("forNewCustomers")})</span>
+                  </FieldLabel>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <StyledInput
+                      id="defaultOverageRate"
+                      name="defaultOverageRate"
+                      type="number"
+                      min="5" max="50" step="1"
+                      value={settingsData.defaultOverageRate ?? 20}
+                      onChange={handleSettingsChange}
+                      style={{ width: 120 }}
+                    />
+                    <span style={{ fontSize: 13, color: MUTED }}>{t("daPerKm")}</span>
+                  </div>
+                  <p style={{ fontSize: 12, color: MUTED, marginTop: 6 }}>{t("overageRateDescription")}</p>
+                </div>
+              </div>
+            </SectionCard>
+
+            <div>
+              <SaveBtn onClick={handleSaveSettings} disabled={isLoading}>
+                <Save style={{ width: 15, height: 15 }} />
+                {isLoading ? t("saving") : t("saveSettings")}
+              </SaveBtn>
+            </div>
+          </div>
+        )}
+
+        {/* ── BILLING ─────────────────────────────────────────────────────── */}
+        {activeTab === "billing" && (
+          <SectionCard title={t("currentSubscription")}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+              {[
+                { label: t("plan"),         value: "Professional" },
+                { label: t("billingCycle"), value: "Monthly" },
+                { label: t("amount"),       value: "15,000 DZD" },
+                { label: t("renewalDate"),  value: "Feb 4, 2025" },
+              ].map(({ label, value }) => (
+                <div key={label} style={{
+                  background: SURFACE2, borderRadius: 10, padding: '14px 16px',
+                  border: `1px solid ${BORDER_COLOR}`,
+                }}>
+                  <p style={{ fontSize: 12, color: MUTED, marginBottom: 4 }}>{label}</p>
+                  <p style={{ fontSize: 15, fontWeight: 600, color: TEXT, margin: 0 }}>{value}</p>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
+
+        {/* ── NOTIFICATIONS ───────────────────────────────────────────────── */}
+        {activeTab === "notifications" && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, color: TEXT, margin: 0 }}>{t("notificationPreferences")}</h3>
+              <button
+                onClick={() => router.push("/dashboard")}
+                style={{
+                  padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                  borderWidth: 1, borderStyle: 'solid', borderColor: BORDER_COLOR,
+                  background: 'transparent', color: MUTED,
+                  fontFamily: FONT, cursor: 'pointer', transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => { const el = e.currentTarget as HTMLButtonElement; el.style.borderColor = GREEN; el.style.color = GREEN }}
+                onMouseLeave={e => { const el = e.currentTarget as HTMLButtonElement; el.style.borderColor = BORDER_COLOR; el.style.color = MUTED }}
+              >
+                {t("viewAllInDashboard")}
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[
+                { label: t("newContractCreated"), description: t("newContractDesc") },
+                { label: t("paymentReceived"),    description: t("paymentReceivedDesc") },
+                { label: t("maintenanceDue"),     description: t("maintenanceDueDesc") },
+                { label: t("vehicleReturned"),    description: t("vehicleReturnedDesc") },
+              ].map((notif, i) => (
+                <CheckRow key={i} label={notif.label} description={notif.description} />
+              ))}
+            </div>
+
+            {/* Critical alerts */}
+            {criticalNotifications.length > 0 && (
+              <div>
+                <h4 style={{ fontSize: 14, fontWeight: 600, color: TEXT, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Bell style={{ width: 15, height: 15, color: MUTED }} />
+                  {t("criticalAlerts")}
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 220, overflowY: 'auto' }}>
+                  {criticalNotifications.map(notif => (
+                    <div
+                      key={notif.id}
+                      style={{
+                        padding: 14, borderRadius: 10,
+                        borderLeft: '3px solid #EF4444',
+                        background: 'rgba(239,68,68,0.06)',
+                        border: `1px solid rgba(239,68,68,0.2)`,
+                        borderLeftWidth: 3,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                        <div style={{ flex: 1 }}>
+                          <p style={{ fontSize: 12, fontWeight: 600, color: '#EF4444', marginBottom: 4 }}>
+                            🚨 {notif.title}
+                          </p>
+                          <p style={{ fontSize: 12, color: MUTED, marginBottom: 4 }}>
+                            {notif.message.slice(0, 100)}...
+                          </p>
+                          <p style={{ fontSize: 11, color: MUTED }}>
+                            {new Date(notif.created_at).toLocaleDateString('fr-DZ')}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => dismissNotification(notif.id)}
+                          title={t("dismiss")}
+                          style={{
+                            width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            borderRadius: 6, border: 'none', background: 'transparent',
+                            color: '#EF4444', cursor: 'pointer', flexShrink: 0,
+                            transition: 'background 0.15s',
+                          }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.15)' }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                        >
+                          <X style={{ width: 13, height: 13 }} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
+    </>
   )
 }

@@ -1,10 +1,16 @@
 // components/dashboard/VehiclePhotosTab.tsx
 "use client"
 import { useState, useRef } from "react"
-import { Button } from "@/components/ui/button"
-import { Upload, X, Loader2, ImageIcon } from "lucide-react"
+import { Upload, X, Loader2, ImageIcon, Trash2 } from "lucide-react"
 import toast from "react-hot-toast"
 import { updateVehicle, type Vehicle } from "@/lib/vehicles.api"
+
+/* ─── tokens ─────────────────────────────────────────────────── */
+const FONT    = "'Plus Jakarta Sans', system-ui, sans-serif"
+const GREEN   = "#22C55E"
+const G_GLOW  = "rgba(34,197,94,0.22)"
+const SURFACE = "rgba(255,255,255,0.04)"
+const BORDER  = "rgba(255,255,255,0.07)"
 
 interface VehiclePhotosTabProps {
   vehicle: Vehicle
@@ -12,240 +18,168 @@ interface VehiclePhotosTabProps {
 }
 
 export function VehiclePhotosTab({ vehicle, onUpdate }: VehiclePhotosTabProps) {
-  const [uploading, setUploading] = useState(false)
+  // ── all state & logic unchanged ──────────────────────────────
+  const [uploading, setUploading]         = useState(false)
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
-  const [previewUrls, setPreviewUrls] = useState<string[]>([])
-  const [dragActive, setDragActive] = useState(false)
+  const [previewUrls, setPreviewUrls]     = useState<string[]>([])
+  const [dragActive, setDragActive]       = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Handle file selection (from click)
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
-   
-    // Validate files
     const validFiles = files.filter(file => {
-      if (!file.type.startsWith('image/')) {
-        toast.error(`${file.name} is not an image`)
-        return false
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error(`${file.name} is too large (max 5MB)`)
-        return false
-      }
+      if (!file.type.startsWith("image/")) { toast.error(`${file.name} is not an image`); return false }
+      if (file.size > 5 * 1024 * 1024) { toast.error(`${file.name} is too large (max 5MB)`); return false }
       return true
     })
     if (validFiles.length === 0) return
-    // Create preview URLs
-    const newPreviewUrls = validFiles.map(file => URL.createObjectURL(file))
-    setPreviewUrls(prev => [...prev, ...newPreviewUrls])
+    const newUrls = validFiles.map(f => URL.createObjectURL(f))
+    setPreviewUrls(prev => [...prev, ...newUrls])
     setSelectedFiles(prev => [...prev, ...validFiles])
-    // Reset input
-    e.target.value = ''
+    e.target.value = ""
   }
 
-  // Handle drop (drag and drop)
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(false)
-
+    e.preventDefault(); e.stopPropagation(); setDragActive(false)
     const files = Array.from(e.dataTransfer.files)
-   
-    // Validate files (same logic as handleFileSelect)
     const validFiles = files.filter(file => {
-      if (!file.type.startsWith('image/')) {
-        toast.error(`${file.name} is not an image`)
-        return false
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error(`${file.name} is too large (max 5MB)`)
-        return false
-      }
+      if (!file.type.startsWith("image/")) { toast.error(`${file.name} is not an image`); return false }
+      if (file.size > 5 * 1024 * 1024) { toast.error(`${file.name} is too large (max 5MB)`); return false }
       return true
     })
     if (validFiles.length === 0) return
-    // Create preview URLs
-    const newPreviewUrls = validFiles.map(file => URL.createObjectURL(file))
-    setPreviewUrls(prev => [...prev, ...newPreviewUrls])
+    const newUrls = validFiles.map(f => URL.createObjectURL(f))
+    setPreviewUrls(prev => [...prev, ...newUrls])
     setSelectedFiles(prev => [...prev, ...validFiles])
   }
 
-  // Drag handlers
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(true)
-  }
+  const handleDragOver  = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); setDragActive(true) }
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); setDragActive(true) }
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); setDragActive(false) }
+  const handleAreaClick = () => { fileInputRef.current?.click() }
 
-  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(true)
-  }
-
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(false)
-  }
-
-  // Trigger file input click
-  const handleAreaClick = () => {
-    fileInputRef.current?.click()
-  }
-
-  // Remove selected file
   const removeSelectedFile = (index: number) => {
     URL.revokeObjectURL(previewUrls[index])
     setPreviewUrls(prev => prev.filter((_, i) => i !== index))
     setSelectedFiles(prev => prev.filter((_, i) => i !== index))
   }
 
-  // Upload photos
   const handleUpload = async () => {
-    if (selectedFiles.length === 0) {
-      toast.error('Please select at least one photo')
-      return
-    }
+    if (selectedFiles.length === 0) { toast.error("Please select at least one photo"); return }
     setUploading(true)
     try {
-      // Convert files to base64 for demo (in production, upload to cloud storage)
-      const base64Photos = await Promise.all(
-        selectedFiles.map(file => {
-          return new Promise<string>((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onload = () => resolve(reader.result as string)
-            reader.onerror = reject
-            reader.readAsDataURL(file)
-          })
+      const base64Photos = await Promise.all(selectedFiles.map(file =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(file)
         })
-      )
-      // Update vehicle with new photos
+      ))
       const currentPhotos = vehicle.photos || []
-      const response = await updateVehicle(vehicle.id, {
-        photos: [...currentPhotos, ...base64Photos],
-      })
+      const response = await updateVehicle(vehicle.id, { photos: [...currentPhotos, ...base64Photos] })
       if (response.success) {
-        toast.success('Photos uploaded successfully!')
-        setSelectedFiles([])
-        setPreviewUrls([])
-        onUpdate() // Refresh vehicle data
-      }
-    } catch (error: any) {
-      console.error('Upload error:', error)
-      toast.error('Failed to upload photos')
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  // Delete existing photo
-  const handleDeletePhoto = async (photoUrl: string) => {
-    if (!confirm('Are you sure you want to delete this photo?')) {
-      return
-    }
-    try {
-      const updatedPhotos = (vehicle.photos || []).filter(url => url !== photoUrl)
-      const response = await updateVehicle(vehicle.id, {
-        photos: updatedPhotos,
-      })
-      if (response.success) {
-        toast.success('Photo deleted successfully!')
+        toast.success("Photos uploaded successfully!")
+        setSelectedFiles([]); setPreviewUrls([])
         onUpdate()
       }
     } catch (error: any) {
-      console.error('Delete error:', error)
-      toast.error('Failed to delete photo')
-    }
+      console.error("Upload error:", error)
+      toast.error("Failed to upload photos")
+    } finally { setUploading(false) }
   }
 
+  const handleDeletePhoto = async (photoUrl: string) => {
+    if (!confirm("Are you sure you want to delete this photo?")) return
+    try {
+      const updatedPhotos = (vehicle.photos || []).filter(url => url !== photoUrl)
+      const response = await updateVehicle(vehicle.id, { photos: updatedPhotos })
+      if (response.success) { toast.success("Photo deleted successfully!"); onUpdate() }
+    } catch (error: any) {
+      console.error("Delete error:", error)
+      toast.error("Failed to delete photo")
+    }
+  }
+  // ────────────────────────────────────────────────────────────
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div style={{ fontFamily: FONT, color: "#fff", display: "flex", flexDirection: "column", gap: 28 }}>
+      <style>{`@keyframes vp-spin { to { transform:rotate(360deg); } }`}</style>
+
+      {/* header */}
       <div>
-        <h2 className="text-2xl font-bold mb-2">Vehicle Photos</h2>
-        <p className="text-muted-foreground">Upload and manage photos of this vehicle</p>
+        <h2 style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.035em", marginBottom: 4 }}>Vehicle Photos</h2>
+        <p style={{ fontSize: 13, color: "#9CA3AF" }}>Upload and manage photos of this vehicle</p>
       </div>
-      {/* Upload Area */}
-      <div 
-        className={`rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors ${
-          dragActive 
-            ? 'border-primary bg-primary/5' 
-            : 'border-border hover:border-primary/50'
-        }`}
+
+      {/* ── drop zone ── */}
+      <div
         onClick={handleAreaClick}
         onDragOver={handleDragOver}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        style={{
+          borderRadius: 16, padding: "36px 24px", cursor: "pointer",
+          border: `2px dashed ${dragActive ? GREEN : BORDER}`,
+          background: dragActive ? "rgba(34,197,94,0.06)" : SURFACE,
+          textAlign: "center", transition: "all 0.22s",
+        }}
+        onMouseEnter={e => { if (!dragActive) e.currentTarget.style.borderColor = "rgba(34,197,94,0.4)" }}
+        onMouseLeave={e => { if (!dragActive) e.currentTarget.style.borderColor = BORDER }}
       >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={handleFileSelect}
-          className="hidden"
-        />
-        <div className="text-center">
-          <div className="flex justify-center mb-4">
-            <div className={`rounded-full p-4 transition-colors ${
-              dragActive ? 'bg-primary' : 'bg-primary/10'
-            }`}>
-              <Upload className={`w-8 h-8 ${dragActive ? 'text-primary-foreground' : 'text-primary'}`} />
-            </div>
-          </div>
-          <h3 className="text-lg font-semibold mb-2">Upload Vehicle Photos</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            Drag and drop images here, or click to browse
-          </p>
-          <p className="text-xs text-muted-foreground mb-4">
-            Supports: JPG, PNG, GIF (Max 5MB each)
-          </p>
-          <Button type="button" variant="outline" className="cursor-pointer">
-            <Upload className="w-4 h-4 mr-2" />
-            Choose Files
-          </Button>
+        <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileSelect} style={{ display: "none" }} />
+
+        {/* upload icon */}
+        <div style={{
+          width: 56, height: 56, borderRadius: 14, margin: "0 auto 16px",
+          background: dragActive ? "rgba(34,197,94,0.15)" : "rgba(255,255,255,0.05)",
+          border: `1px solid ${dragActive ? "rgba(34,197,94,0.3)" : BORDER}`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: "all 0.22s",
+          boxShadow: dragActive ? `0 0 20px ${G_GLOW}` : "none",
+        }}>
+          <Upload size={22} color={dragActive ? GREEN : "#6B7280"} />
         </div>
-        {/* Selected Files Preview */}
+
+        <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Upload Vehicle Photos</h3>
+        <p style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 4 }}>Drag and drop images here, or click to browse</p>
+        <p style={{ fontSize: 11, color: "#6B7280", marginBottom: 18 }}>Supports: JPG, PNG, GIF (Max 5MB each)</p>
+
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); handleAreaClick() }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "9px 18px", borderRadius: 10, fontFamily: FONT, fontSize: 13, fontWeight: 600, background: "transparent", border: `1px solid ${BORDER}`, color: "#9CA3AF", cursor: "pointer", transition: "all 0.18s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"; e.currentTarget.style.color = "#fff" }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.color = "#9CA3AF" }}
+        >
+          <Upload size={13} /> Choose Files
+        </button>
+
+        {/* selected previews */}
         {previewUrls.length > 0 && (
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-sm font-medium">{selectedFiles.length} file(s) selected</p>
-              <Button
+          <div style={{ marginTop: 24 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#9CA3AF" }}>{selectedFiles.length} file(s) selected</span>
+              <button
                 onClick={handleUpload}
                 disabled={uploading}
-                size="sm"
+                style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 16px", borderRadius: 9, border: "none", fontFamily: FONT, fontSize: 12, fontWeight: 600, cursor: uploading ? "not-allowed" : "pointer", background: uploading ? "rgba(34,197,94,0.35)" : GREEN, color: "#fff", transition: "all 0.2s" }}
               >
                 {uploading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Uploading...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4 mr-2" />
-                    Upload All
-                  </>
-                )}
-              </Button>
+                  <><span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "vp-spin 0.7s linear infinite" }} /> Uploading…</>
+                ) : <><Upload size={12} /> Upload All</>}
+              </button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {previewUrls.map((url, index) => (
-                <div key={index} className="relative group">
-                  <img
-                    src={url}
-                    alt={`Preview ${index + 1}`}
-                    className="w-full h-32 object-cover rounded-lg border border-border"
-                  />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(130px,1fr))", gap: 10 }}>
+              {previewUrls.map((url, i) => (
+                <div key={i} style={{ position: "relative", borderRadius: 10, overflow: "hidden" }}>
+                  <img src={url} alt={`Preview ${i + 1}`} style={{ width: "100%", height: 110, objectFit: "cover", display: "block" }} />
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removeSelectedFile(index)
-                    }}
-                    className="absolute top-2 right-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={e => { e.stopPropagation(); removeSelectedFile(i) }}
+                    style={{ position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: 6, background: "rgba(239,68,68,0.9)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                   >
-                    <X className="w-4 h-4" />
+                    <X size={11} color="#fff" />
                   </button>
                 </div>
               ))}
@@ -253,38 +187,38 @@ export function VehiclePhotosTab({ vehicle, onUpdate }: VehiclePhotosTabProps) {
           </div>
         )}
       </div>
-      {/* Existing Photos */}
+
+      {/* ── existing photos ── */}
       <div>
-        <h3 className="text-lg font-semibold mb-4">Current Photos</h3>
+        <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Current Photos</h3>
+
         {!vehicle.photos || vehicle.photos.length === 0 ? (
-          <div className="text-center py-12 border border-dashed border-border rounded-lg">
-            <ImageIcon className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground">No photos uploaded yet</p>
+          <div style={{ textAlign: "center", padding: "40px 24px", borderRadius: 14, border: `1px dashed ${BORDER}` }}>
+            <ImageIcon size={32} color="#4B5563" style={{ margin: "0 auto 12px" }} />
+            <p style={{ color: "#9CA3AF", fontSize: 14 }}>No photos uploaded yet</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {vehicle.photos.map((photo, index) => (
-              <div key={index} className="relative group">
-                <img
-                  src={photo}
-                  alt={`${vehicle.brand} ${vehicle.model} - Photo ${index + 1}`}
-                  className="w-full h-48 object-cover rounded-lg border border-border"
-                />
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleDeletePhoto(photo)
-                    }}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 12 }}>
+            {vehicle.photos.map((photo, i) => (
+              <div key={i} style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${BORDER}` }}
+                onMouseEnter={e => (e.currentTarget.querySelector(".photo-overlay") as HTMLElement)!.style.opacity = "1"}
+                onMouseLeave={e => (e.currentTarget.querySelector(".photo-overlay") as HTMLElement)!.style.opacity = "0"}
+              >
+                <img src={photo} alt={`${vehicle.brand} ${vehicle.model} - Photo ${i + 1}`} style={{ width: "100%", height: 160, objectFit: "cover", display: "block" }} />
+
+                {/* hover overlay */}
+                <div className="photo-overlay" style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", opacity: 0, transition: "opacity 0.2s", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <button
+                    onClick={e => { e.stopPropagation(); handleDeletePhoto(photo) }}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 9, border: "none", fontFamily: FONT, fontSize: 12, fontWeight: 600, background: "rgba(239,68,68,0.9)", color: "#fff", cursor: "pointer" }}
                   >
-                    <X className="w-4 h-4 mr-1" />
-                    Delete
-                  </Button>
+                    <Trash2 size={12} /> Delete
+                  </button>
                 </div>
-                {index === 0 && (
-                  <div className="absolute top-2 left-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded">
+
+                {/* main photo badge */}
+                {i === 0 && (
+                  <div style={{ position: "absolute", top: 8, left: 8, padding: "2px 8px", borderRadius: 6, background: GREEN, fontSize: 10, fontWeight: 700, color: "#fff", letterSpacing: "0.04em" }}>
                     Main Photo
                   </div>
                 )}

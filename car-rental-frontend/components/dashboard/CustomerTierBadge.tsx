@@ -1,8 +1,8 @@
-// components/dashboard/CustomerTierBadge.tsx
 "use client"
-
-import { Badge } from "@/components/ui/badge"
 import { Award, Star, Crown, Zap } from "lucide-react"
+
+/* ─── tokens ─────────────────────────────────────────────────── */
+const FONT = "'Plus Jakarta Sans', system-ui, sans-serif"
 
 interface CustomerTierBadgeProps {
   tier: 'NEW' | 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM'
@@ -11,53 +11,74 @@ interface CustomerTierBadgeProps {
   size?: 'sm' | 'md' | 'lg'
 }
 
+/* ── tier config — same logic, new colours tuned for dark bg ── */
 const TIER_CONFIG = {
   NEW: {
-    color: 'bg-gray-500 text-white hover:bg-gray-600',
+    bg: "rgba(107,114,128,0.18)",
+    border: "rgba(107,114,128,0.35)",
+    color: "#D1D5DB",
     icon: Award,
-    label: 'New',
+    label: "New",
   },
   BRONZE: {
-    color: 'bg-orange-600 text-white hover:bg-orange-700',
+    bg: "rgba(194,120,60,0.18)",
+    border: "rgba(194,120,60,0.4)",
+    color: "#FCA97A",
     icon: Award,
-    label: 'Bronze',
+    label: "Bronze",
   },
   SILVER: {
-    color: 'bg-gray-400 text-white hover:bg-gray-500',
+    bg: "rgba(156,163,175,0.18)",
+    border: "rgba(156,163,175,0.35)",
+    color: "#E5E7EB",
     icon: Star,
-    label: 'Silver',
+    label: "Silver",
   },
   GOLD: {
-    color: 'bg-yellow-500 text-black hover:bg-yellow-600',
+    bg: "rgba(234,179,8,0.18)",
+    border: "rgba(234,179,8,0.4)",
+    color: "#FDE047",
     icon: Crown,
-    label: 'Gold',
+    label: "Gold",
   },
   PLATINUM: {
-    color: 'bg-purple-600 text-white hover:bg-purple-700',
+    bg: "rgba(168,85,247,0.18)",
+    border: "rgba(168,85,247,0.4)",
+    color: "#D8B4FE",
     icon: Zap,
-    label: 'Platinum',
+    label: "Platinum",
   },
 }
 
-export function CustomerTierBadge({ 
-  tier, 
-  tierName, 
+const SIZE_STYLES = {
+  sm: { fontSize: 10, padding: "2px 8px", iconSize: 10, gap: 4 },
+  md: { fontSize: 12, padding: "4px 10px", iconSize: 12, gap: 5 },
+  lg: { fontSize: 13, padding: "5px 13px", iconSize: 13, gap: 6 },
+}
+
+export function CustomerTierBadge({
+  tier,
+  tierName,
   showIcon = true,
-  size = 'md' 
+  size = 'md',
 }: CustomerTierBadgeProps) {
+  // logic unchanged — fallback to NEW if tier unrecognised
   const config = TIER_CONFIG[tier] || TIER_CONFIG.NEW
-  const Icon = config.icon
-  
-  const sizeClasses = {
-    sm: 'text-xs px-2 py-0.5',
-    md: 'text-sm px-3 py-1',
-    lg: 'text-base px-4 py-1.5',
-  }
+  const Icon   = config.icon
+  const sz     = SIZE_STYLES[size]
 
   return (
-    <Badge className={`${config.color} ${sizeClasses[size]} font-semibold`}>
-      {showIcon && <Icon className="w-3 h-3 mr-1" />}
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: sz.gap,
+      padding: sz.padding, borderRadius: 6,
+      background: config.bg, border: `1px solid ${config.border}`,
+      color: config.color,
+      fontSize: sz.fontSize, fontWeight: 700,
+      fontFamily: FONT, letterSpacing: "0.02em",
+      whiteSpace: "nowrap",
+    }}>
+      {showIcon && <Icon size={sz.iconSize} />}
       {tierName || config.label}
-    </Badge>
+    </span>
   )
 }

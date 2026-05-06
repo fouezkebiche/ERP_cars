@@ -83,8 +83,13 @@ export interface UpdateEmployeeData {
   salary?: number;
   commission_rate?: number;
   status?: string;
+  role?: string;
+  salary_type?: string;
   custom_permissions?: Record<string, boolean>;
   work_schedule?: Record<string, { start: string; end: string }>;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  notes?: string;
 }
 
 class EmployeeAPI {
@@ -99,6 +104,13 @@ class EmployeeAPI {
   private async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: 'Request failed' }));
+      
+      // Handle validation errors with details
+      if (response.status === 422 && error.details) {
+        const validationErrors = error.details.map((detail: any) => detail.msg).join(', ');
+        throw new Error(`Validation failed: ${validationErrors}`);
+      }
+      
       throw new Error(error.message || `HTTP ${response.status}`);
     }
     const data = await response.json();

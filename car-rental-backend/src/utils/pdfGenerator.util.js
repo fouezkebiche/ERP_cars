@@ -8,99 +8,212 @@ const { generateChartsForReport } = require('./chartGenerator.util');
 const generateReportHTML = (report, type, charts = {}) => {
   const styles = `
     <style>
+      @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+      
       body {
-        font-family: Arial, sans-serif;
-        padding: 40px;
-        color: #333;
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        background: #FFFFFF;
+        color: #1F2937;
+        padding: 32px;
+        margin: 0;
+        line-height: 1.6;
       }
+      
       .header {
         text-align: center;
-        margin-bottom: 40px;
-        border-bottom: 3px solid #3b82f6;
-        padding-bottom: 20px;
+        margin-bottom: 48px;
+        padding-bottom: 24px;
+        border-bottom: 2px solid #E5E7EB;
+        position: relative;
       }
+      
+      .header::before {
+        content: '';
+        position: absolute;
+        bottom: -2px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 80px;
+        height: 2px;
+        background: #22C55E;
+        border-radius: 1px;
+      }
+      
       .header h1 {
-        color: #3b82f6;
-        margin: 0;
+        color: #1F2937;
+        margin: 0 0 16px 0;
+        font-size: 32px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
       }
+      
       .header .subtitle {
-        color: #6b7280;
-        margin-top: 10px;
+        color: #6B7280;
+        margin: 8px 0;
+        font-size: 14px;
+        font-weight: 500;
       }
+      
       .summary-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 20px;
-        margin-bottom: 40px;
+        margin-bottom: 48px;
       }
+      
       .summary-card {
-        background: #f3f4f6;
-        padding: 20px;
-        border-radius: 8px;
-        border-left: 4px solid #3b82f6;
+        background: #F9FAFB;
+        padding: 24px;
+        border-radius: 16px;
+        border: 1px solid #E5E7EB;
+        border-left: 4px solid #22C55E;
+        transition: all 0.3s ease;
       }
+      
+      .summary-card:hover {
+        background: #F3F4F6;
+        border-color: #D1D5DB;
+        transform: translateY(-2px);
+      }
+      
       .summary-card h3 {
-        margin: 0 0 10px 0;
-        color: #6b7280;
-        font-size: 14px;
-        font-weight: normal;
+        margin: 0 0 12px 0;
+        color: #6B7280;
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
       }
+      
       .summary-card .value {
-        font-size: 28px;
-        font-weight: bold;
-        color: #111827;
+        font-size: 32px;
+        font-weight: 800;
+        color: #1F2937;
+        margin-bottom: 8px;
+        letter-spacing: -0.02em;
       }
+      
       .summary-card .change {
-        font-size: 14px;
-        margin-top: 5px;
+        font-size: 13px;
+        margin-top: 8px;
+        font-weight: 600;
       }
-      .change.positive { color: #10b981; }
-      .change.negative { color: #ef4444; }
+      
+      .change.positive { 
+        color: #22C55E; 
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      
+      .change.negative { 
+        color: #EF4444;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      
       table {
         width: 100%;
         border-collapse: collapse;
-        margin: 20px 0;
+        margin: 24px 0;
+        background: #F9FAFB;
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid #E5E7EB;
       }
+      
       th {
-        background: #3b82f6;
-        color: white;
-        padding: 12px;
+        background: #F3F4F6;
+        color: #1F2937;
+        padding: 16px;
         text-align: left;
-        font-weight: 600;
+        font-weight: 700;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        border-bottom: 1px solid #E5E7EB;
       }
+      
       td {
-        padding: 12px;
-        border-bottom: 1px solid #e5e7eb;
+        padding: 16px;
+        border-bottom: 1px solid #E5E7EB;
+        color: #374151;
+        font-size: 14px;
       }
+      
+      tr:last-child td {
+        border-bottom: none;
+      }
+      
       tr:hover {
-        background: #f9fafb;
+        background: #F3F4F6;
       }
+      
       .section {
-        margin: 40px 0;
+        margin: 48px 0;
       }
+      
       .section h2 {
-        color: #111827;
-        border-bottom: 2px solid #e5e7eb;
-        padding-bottom: 10px;
-        margin-bottom: 20px;
+        color: #1F2937;
+        border-bottom: 2px solid #E5E7EB;
+        padding-bottom: 12px;
+        margin-bottom: 24px;
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        position: relative;
       }
+      
+      .section h2::before {
+        content: '';
+        position: absolute;
+        bottom: -2px;
+        left: 0;
+        width: 60px;
+        height: 2px;
+        background: #22C55E;
+        border-radius: 1px;
+      }
+      
       .footer {
-        margin-top: 60px;
+        margin-top: 72px;
         text-align: center;
-        color: #6b7280;
+        color: #6B7280;
         font-size: 12px;
-        border-top: 1px solid #e5e7eb;
-        padding-top: 20px;
+        border-top: 1px solid #E5E7EB;
+        padding-top: 24px;
+        font-weight: 500;
       }
+      
       .chart-container {
-        margin: 30px 0;
+        margin: 36px 0;
         text-align: center;
       }
+      
       .chart-container img {
         max-width: 100%;
         height: auto;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        border-radius: 16px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        border: 1px solid #E5E7EB;
+      }
+      
+      .highlight {
+        color: #22C55E;
+        font-weight: 600;
+      }
+      
+      .accent-text {
+        color: #60A5FA;
+        font-weight: 600;
+      }
+      
+      @media print {
+        body {
+          -webkit-print-color-adjust: exact;
+          color-adjust: exact;
+        }
       }
     </style>
   `;
@@ -112,43 +225,60 @@ const generateReportHTML = (report, type, charts = {}) => {
       <div class="header">
         <h1>Executive Summary Report</h1>
         <div class="subtitle">
-          Period: ${new Date(report.period.start).toLocaleDateString()} - ${new Date(report.period.end).toLocaleDateString()}
+          <span class="accent-text">Period:</span> ${new Date(report.period.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(report.period.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
         </div>
-        <div class="subtitle">Generated: ${new Date(report.generated_at).toLocaleString()}</div>
+        <div class="subtitle">
+          <span class="accent-text">Generated:</span> ${new Date(report.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </div>
       </div>
 
       <div class="summary-grid">
         <div class="summary-card">
           <h3>Total Revenue</h3>
-          <div class="value">${report.summary.total_revenue.toLocaleString()} DA</div>
+          <div class="value">${report.summary.total_revenue.toLocaleString()} <span style="font-size: 20px; font-weight: 600;">DA</span></div>
           <div class="change ${report.summary.revenue_growth >= 0 ? 'positive' : 'negative'}">
-            ${report.summary.revenue_growth >= 0 ? '↑' : '↓'} ${Math.abs(report.summary.revenue_growth).toFixed(1)}%
+            ${report.summary.revenue_growth >= 0 ? '↑' : '↓'} ${Math.abs(report.summary.revenue_growth).toFixed(1)}% vs last period
           </div>
         </div>
         <div class="summary-card">
           <h3>Fleet Utilization</h3>
-          <div class="value">${report.summary.fleet_utilization.toFixed(1)}%</div>
+          <div class="value">${report.summary.fleet_utilization.toFixed(1)}<span style="font-size: 20px; font-weight: 600;">%</span></div>
+          <div class="change" style="color: #6B7280; font-weight: 400;">
+            ${report.summary.fleet_utilization >= 70 ? 'Excellent' : report.summary.fleet_utilization >= 50 ? 'Good' : 'Needs Attention'}
+          </div>
         </div>
         <div class="summary-card">
           <h3>Active Contracts</h3>
           <div class="value">${report.summary.total_contracts}</div>
+          <div class="change" style="color: #6B7280; font-weight: 400;">
+            Currently running
+          </div>
         </div>
         <div class="summary-card">
           <h3>Active Customers</h3>
           <div class="value">${report.summary.active_customers}</div>
+          <div class="change" style="color: #6B7280; font-weight: 400;">
+            This period
+          </div>
         </div>
         <div class="summary-card">
           <h3>New Customers</h3>
           <div class="value">${report.summary.new_customers}</div>
+          <div class="change ${report.summary.new_customers > 0 ? 'positive' : 'negative'}">
+            ${report.summary.new_customers > 0 ? '↑' : '→'} ${report.summary.new_customers > 0 ? 'Growth' : 'No change'}
+          </div>
         </div>
         <div class="summary-card">
           <h3>Maintenance Alerts</h3>
-          <div class="value">${report.summary.maintenance_alerts}</div>
+          <div class="value" style="color: ${report.summary.maintenance_alerts > 0 ? '#EF4444' : '#22C55E'};">${report.summary.maintenance_alerts}</div>
+          <div class="change" style="color: ${report.summary.maintenance_alerts > 0 ? '#EF4444' : '#22C55E'};">
+            ${report.summary.maintenance_alerts > 0 ? '⚠️ Action Required' : '✓ All Clear'}
+          </div>
         </div>
       </div>
 
       <div class="section">
-        <h2>Top Performing Vehicles</h2>
+        <h2>🏆 Top Performing Vehicles</h2>
         <table>
           <thead>
             <tr>
@@ -159,12 +289,19 @@ const generateReportHTML = (report, type, charts = {}) => {
             </tr>
           </thead>
           <tbody>
-            ${report.top_vehicles.map(v => `
+            ${report.top_vehicles.map((v, index) => `
               <tr>
-                <td>${v.brand} ${v.model}</td>
-                <td>${v.registration_number}</td>
-                <td>${v.utilization_rate.toFixed(1)}%</td>
-                <td>${v.total_revenue.toLocaleString()} DA</td>
+                <td><strong>${v.brand} ${v.model}</strong></td>
+                <td><span class="accent-text">${v.registration_number}</span></td>
+                <td>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="flex: 1; height: 4px; background: #E5E7EB; border-radius: 2px; overflow: hidden;">
+                      <div style="width: ${Math.min(v.utilization_rate, 100)}%; height: 100%; background: #22C55E; border-radius: 2px;"></div>
+                    </div>
+                    <span class="highlight">${v.utilization_rate.toFixed(1)}%</span>
+                  </div>
+                </td>
+                <td><strong>${v.total_revenue.toLocaleString()}</strong> DA</td>
               </tr>
             `).join('')}
           </tbody>
@@ -172,23 +309,23 @@ const generateReportHTML = (report, type, charts = {}) => {
       </div>
 
       <div class="section">
-        <h2>Top Customers</h2>
+        <h2>👥 Top Customers by Lifetime Value</h2>
         <table>
           <thead>
             <tr>
-              <th>Name</th>
+              <th>Customer Name</th>
               <th>Type</th>
               <th>Total Rentals</th>
               <th>Lifetime Value</th>
             </tr>
           </thead>
           <tbody>
-            ${report.top_customers.map(c => `
+            ${report.top_customers.map((c, index) => `
               <tr>
-                <td>${c.name}</td>
-                <td>${c.type}</td>
+                <td><strong>${c.name}</strong></td>
+                <td><span style="text-transform: capitalize; padding: 4px 8px; background: rgba(96,165,250,0.1); border-radius: 6px; font-size: 12px;">${c.type}</span></td>
                 <td>${c.total_rentals}</td>
-                <td>${c.lifetime_value.toLocaleString()} DA</td>
+                <td><strong class="highlight">${c.lifetime_value.toLocaleString()}</strong> DA</td>
               </tr>
             `).join('')}
           </tbody>
@@ -381,7 +518,21 @@ const generateReportHTML = (report, type, charts = {}) => {
     <body>
       ${content}
       <div class="footer">
-        Car Rental Management System | Report generated on ${new Date().toLocaleString()}
+        <div style="margin-bottom: 8px;">
+          <span class="highlight">Car Manager</span> - Professional Car Rental Management System
+        </div>
+        <div>
+          Report generated on ${new Date().toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })}
+        </div>
+        <div style="margin-top: 8px; font-size: 11px; opacity: 0.7;">
+          Confidential & Proprietary Information
+        </div>
       </div>
     </body>
     </html>

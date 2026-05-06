@@ -1,11 +1,14 @@
 // components/analytics/payment-methods-chart.tsx
 "use client"
-
 import { useMemo } from 'react'
 import { Doughnut } from 'react-chartjs-2'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
+
+const FONT  = "'Plus Jakarta Sans', system-ui, sans-serif"
+const MUTED = 'rgba(255,255,255,0.4)'
+const TEXT  = '#FFFFFF'
 
 interface PaymentMethodsChartProps {
   data: Array<{ method: string; amount: number; count: number }>
@@ -13,14 +16,9 @@ interface PaymentMethodsChartProps {
 
 export function PaymentMethodsChart({ data }: PaymentMethodsChartProps) {
   const chartData = useMemo(() => {
-    if (!data || data.length === 0) {
-      return {
-        labels: [],
-        datasets: [],
-      }
-    }
+    if (!data || data.length === 0) return { labels: [], datasets: [] }
 
-    const labels = data.map((d) => 
+    const labels = data.map((d) =>
       d.method.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())
     )
     const amounts = data.map((d) => d.amount)
@@ -31,14 +29,14 @@ export function PaymentMethodsChart({ data }: PaymentMethodsChartProps) {
         {
           data: amounts,
           backgroundColor: [
-            'rgb(59, 130, 246)',
-            'rgb(16, 185, 129)',
-            'rgb(245, 158, 11)',
-            'rgb(239, 68, 68)',
-            'rgb(139, 92, 246)',
+            'rgba(59,130,246,0.85)',
+            'rgba(34,197,94,0.85)',
+            'rgba(245,158,11,0.85)',
+            'rgba(239,68,68,0.85)',
+            'rgba(139,92,246,0.85)',
           ],
           borderWidth: 2,
-          borderColor: '#fff',
+          borderColor: '#080B10',
         },
       ],
     }
@@ -50,16 +48,29 @@ export function PaymentMethodsChart({ data }: PaymentMethodsChartProps) {
     plugins: {
       legend: {
         position: 'right' as const,
+        labels: {
+          color: MUTED,
+          font: { family: FONT, size: 12 },
+          padding: 16,
+          boxWidth: 12,
+          boxHeight: 12,
+        },
       },
       title: {
         display: true,
         text: 'Payment Methods Distribution',
-        font: {
-          size: 16,
-          weight: 'bold' as const,
-        },
+        color: TEXT,
+        font: { size: 15, weight: 'bold' as const, family: FONT },
+        padding: { bottom: 16 },
       },
       tooltip: {
+        backgroundColor: 'rgba(8,11,16,0.95)',
+        borderColor: 'rgba(255,255,255,0.07)',
+        borderWidth: 1,
+        titleColor: TEXT,
+        bodyColor: MUTED,
+        titleFont: { family: FONT },
+        bodyFont: { family: FONT },
         callbacks: {
           label: (context: any) => {
             const label = context.label || ''
@@ -75,14 +86,17 @@ export function PaymentMethodsChart({ data }: PaymentMethodsChartProps) {
 
   if (!data || data.length === 0) {
     return (
-      <div className="h-80 flex items-center justify-center text-muted-foreground">
+      <div style={{
+        height: 320, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: MUTED, fontFamily: FONT, fontSize: 14,
+      }}>
         No payment method data available
       </div>
     )
   }
 
   return (
-    <div className="h-80">
+    <div style={{ height: 320 }}>
       <Doughnut data={chartData} options={options} />
     </div>
   )

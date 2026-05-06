@@ -6,10 +6,51 @@ const ExcelJS = require('exceljs');
 const { generateReportPDF: generatePDFFile } = require('../utils/pdfGenerator.util');
 
 /**
+ * Helper: Parse date range from query params with defaults
+ */
+const parseDateRange = (req) => {
+  const { start_date, end_date, period = 'month' } = req.query;
+  
+  let startDate, endDate;
+  
+  if (start_date && end_date) {
+    startDate = new Date(start_date);
+    endDate = new Date(end_date);
+  } else {
+    // Default based on period
+    endDate = new Date();
+    startDate = new Date();
+    
+    switch (period) {
+      case 'today':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate.setDate(startDate.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(startDate.getMonth() - 1);
+        break;
+      case 'quarter':
+        startDate.setMonth(startDate.getMonth() - 3);
+        break;
+      case 'year':
+        startDate.setFullYear(startDate.getFullYear() - 1);
+        break;
+      default:
+        startDate.setMonth(startDate.getMonth() - 1);
+    }
+  }
+  
+  return { startDate, endDate };
+};
+
+/**
  * GET /api/reports/:type
  * Generate report in JSON format
  */
 const generateReport = [
+  query('period').optional().isIn(['today', 'week', 'month', 'quarter', 'year']),
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601(),
   query('vehicleIds').optional().isArray(),
@@ -31,10 +72,17 @@ const generateReport = [
       }
 
       const { type } = req.params;
-      const filters = req.query;
+      const { startDate, endDate } = parseDateRange(req);
       const companyId = req.companyId;
 
-      console.log(`📊 Generating ${type} report for company ${companyId}`);
+      // Build filters object with parsed dates
+      const filters = {
+        ...req.query,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      };
+
+      console.log(`📊 Generating ${type} report for company ${companyId} with period ${req.query.period || 'month'}`);
 
       const report = await reportService.generateReport(companyId, type, filters);
 
@@ -58,6 +106,7 @@ const generateReport = [
  * Generate report as PDF
  */
 const generateReportPDF = [
+  query('period').optional().isIn(['today', 'week', 'month', 'quarter', 'year']),
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601(),
 
@@ -73,10 +122,17 @@ const generateReportPDF = [
       }
 
       const { type } = req.params;
-      const filters = req.query;
+      const { startDate, endDate } = parseDateRange(req);
       const companyId = req.companyId;
 
-      console.log(`📄 Generating ${type} PDF report for company ${companyId}`);
+      // Build filters object with parsed dates
+      const filters = {
+        ...req.query,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      };
+
+      console.log(`📄 Generating ${type} PDF report for company ${companyId} with period ${req.query.period || 'month'}`);
 
       // Generate report data
       const report = await reportService.generateReport(companyId, type, filters);

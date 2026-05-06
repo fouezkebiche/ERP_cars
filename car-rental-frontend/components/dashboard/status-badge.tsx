@@ -1,41 +1,63 @@
-import { cn } from "@/lib/utils"
+// components/dashboard/StatusBadge.tsx
+
+/* ─── tokens ─────────────────────────────────────────────────── */
+const FONT = "'Plus Jakarta Sans', system-ui, sans-serif"
 
 interface StatusBadgeProps {
-  status: string  
+  status: string
   label?: string
   className?: string
 }
 
+/* ── all colours tuned for a dark background ─────────────────── */
+const STATUS_CONFIG: Record<string, { bg: string; border: string; color: string; label: string }> = {
+  available:   { bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.3)",   color: "#4ADE80", label: "Available" },
+  rented:      { bg: "rgba(96,165,250,0.12)",  border: "rgba(96,165,250,0.3)",  color: "#93C5FD", label: "Rented" },
+  maintenance: { bg: "rgba(245,158,11,0.12)",  border: "rgba(245,158,11,0.3)",  color: "#FCD34D", label: "Maintenance" },
+  active:      { bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.3)",   color: "#4ADE80", label: "Active" },
+  completed:   { bg: "rgba(156,163,175,0.12)", border: "rgba(156,163,175,0.25)",color: "#D1D5DB", label: "Completed" },
+  cancelled:   { bg: "rgba(239,68,68,0.12)",   border: "rgba(239,68,68,0.3)",   color: "#F87171", label: "Cancelled" },
+  pending:     { bg: "rgba(245,158,11,0.12)",  border: "rgba(245,158,11,0.3)",  color: "#FCD34D", label: "Pending" },
+  paid:        { bg: "rgba(34,197,94,0.12)",   border: "rgba(34,197,94,0.3)",   color: "#4ADE80", label: "Paid" },
+}
+
 export function StatusBadge({ status, label, className }: StatusBadgeProps) {
-  const statusConfig = {
-    available: { bg: "bg-accent/10", text: "text-accent", label: "Available" },
-    rented: { bg: "bg-blue-100", text: "text-blue-700", label: "Rented" },
-    maintenance: { bg: "bg-amber-100", text: "text-amber-700", label: "Maintenance" },
-    active: { bg: "bg-accent/10", text: "text-accent", label: "Active" },
-    completed: { bg: "bg-gray-100", text: "text-gray-700", label: "Completed" },
-    cancelled: { bg: "bg-destructive/10", text: "text-destructive", label: "Cancelled" },
-    pending: { bg: "bg-amber-100", text: "text-amber-700", label: "Pending" },
-    paid: { bg: "bg-accent/10", text: "text-accent", label: "Paid" },
-    // Optional: Add these for custom styling if desired
-    // draft: { bg: "bg-gray-100", text: "text-gray-700", label: "Draft" },
-    // extended: { bg: "bg-blue-100", text: "text-blue-700", label: "Extended" },
-  }
+  // ── logic unchanged ──────────────────────────────────────────
+  const config = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG]
 
-  // Type assertion for indexing (safe since status is string)
-  const config = statusConfig[status as keyof typeof statusConfig]
-
-  // Safety check: If config is undefined, fallback to a default (prevents crash)
   if (!config) {
-    console.warn(`Unknown status "${status}" in StatusBadge - using default`);
+    console.warn(`Unknown status "${status}" in StatusBadge - using default`)
     return (
-      <span className={cn("px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700", className)}>
+      <span
+        className={className}
+        style={{
+          display: "inline-flex", alignItems: "center",
+          padding: "3px 10px", borderRadius: 99,
+          fontSize: 11, fontWeight: 700, fontFamily: FONT,
+          background: "rgba(107,114,128,0.15)",
+          border: "1px solid rgba(107,114,128,0.28)",
+          color: "#9CA3AF",
+          whiteSpace: "nowrap",
+        }}
+      >
         {label || status}
       </span>
-    );
+    )
   }
 
   return (
-    <span className={cn("px-3 py-1 rounded-full text-xs font-semibold", config.bg, config.text, className)}>
+    <span
+      className={className}
+      style={{
+        display: "inline-flex", alignItems: "center",
+        padding: "3px 10px", borderRadius: 99,
+        fontSize: 11, fontWeight: 700, fontFamily: FONT,
+        background: config.bg,
+        border: `1px solid ${config.border}`,
+        color: config.color,
+        whiteSpace: "nowrap",
+      }}
+    >
       {label || config.label}
     </span>
   )

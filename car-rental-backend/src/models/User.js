@@ -33,16 +33,8 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING(255),
     allowNull: false,
   },
-  // Virtual field for setting password
   password: {
     type: DataTypes.VIRTUAL,
-    set(value) {
-      // Store the plain password temporarily
-      this.setDataValue('password', value);
-      // Hash it and set password_hash
-      const hash = bcrypt.hashSync(value, 10);
-      this.setDataValue('password_hash', hash);
-    },
   },
   phone: {
     type: DataTypes.STRING(50),
@@ -51,7 +43,7 @@ const User = sequelize.define('User', {
     type: DataTypes.TEXT,
   },
   role: {
-    type: DataTypes.ENUM('owner', 'admin', 'manager', 'staff', 'viewer'),
+    type: DataTypes.ENUM('owner', 'admin', 'manager', 'sales_agent', 'fleet_coordinator', 'accountant', 'receptionist', 'staff', 'viewer'),
     defaultValue: 'staff',
   },
   is_active: {
@@ -81,7 +73,7 @@ const User = sequelize.define('User', {
       }
     },
     beforeUpdate: async (user) => {
-      if (user.password) {
+      if (user.changed('password') && user.password) {
         user.password_hash = await bcrypt.hash(user.password, 10);
       }
     },

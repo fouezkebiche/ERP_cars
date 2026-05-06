@@ -15,26 +15,126 @@ import { customerTierApi } from "@/lib/customerTierApi"
 import { CustomerTierBadge } from "@/components/dashboard/CustomerTierBadge"
 import toast from "react-hot-toast"
 
+/* ─── design tokens ─────────────────────────────────────────── */
+const FONT    = "'Plus Jakarta Sans', system-ui, sans-serif"
+const GREEN   = "#22C55E"
+const SURFACE = "rgba(255,255,255,0.04)"
+const BORDER  = "rgba(255,255,255,0.07)"
+const MUTED   = "rgba(255,255,255,0.4)"
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
 interface Customer {
-  id: string
-  full_name: string
-  email?: string
-  phone: string
-  is_blacklisted: boolean
-  total_rentals?: number
+  id: string; full_name: string; email?: string; phone: string
+  is_blacklisted: boolean; total_rentals?: number
+}
+interface Vehicle {
+  id: string; brand: string; model: string; year: number
+  registration_number: string; daily_rate: number; mileage: number; status: string
 }
 
-interface Vehicle {
-  id: string
-  brand: string
-  model: string
-  year: number
-  registration_number: string
-  daily_rate: number
-  mileage: number
-  status: string
+/* ─── small ui helpers ──────────────────────────────────────── */
+function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{
+      padding: "24px 26px", borderRadius: 14,
+      background: SURFACE, border: `1px solid ${BORDER}`,
+    }}>
+      <h2 style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.015em", marginBottom: 18, color: "#fff" }}>
+        {title}
+      </h2>
+      {children}
+    </div>
+  )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: MUTED, marginBottom: 6, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+      {children}
+    </label>
+  )
+}
+
+function StyledInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  const [focused, setFocused] = useState(false)
+  return (
+    <input
+      {...props}
+      onFocus={e => { setFocused(true); props.onFocus?.(e) }}
+      onBlur={e => { setFocused(false); props.onBlur?.(e) }}
+      style={{
+        width: "100%", padding: "10px 13px", borderRadius: 9,
+        border: `1px solid ${focused ? "rgba(34,197,94,0.5)" : BORDER}`,
+        background: "rgba(255,255,255,0.03)", color: "#fff",
+        fontFamily: FONT, fontSize: 14, outline: "none",
+        transition: "border-color 0.2s",
+        boxShadow: focused ? "0 0 0 3px rgba(34,197,94,0.08)" : "none",
+        ...props.style,
+      }}
+    />
+  )
+}
+
+function StyledSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  const [focused, setFocused] = useState(false)
+  return (
+    <select
+      {...props}
+      onFocus={e => { setFocused(true); props.onFocus?.(e) }}
+      onBlur={e => { setFocused(false); props.onBlur?.(e) }}
+      style={{
+        width: "100%", padding: "10px 13px", borderRadius: 9,
+        border: `1px solid ${focused ? "rgba(34,197,94,0.5)" : BORDER}`,
+        background: "#0F1318", color: "#fff",
+        fontFamily: FONT, fontSize: 14, outline: "none",
+        transition: "border-color 0.2s",
+        boxShadow: focused ? "0 0 0 3px rgba(34,197,94,0.08)" : "none",
+        cursor: "pointer",
+      }}
+    />
+  )
+}
+
+function CheckRow({ checked, onChange, children }: { checked: boolean; onChange: (v: boolean) => void; children: React.ReactNode }) {
+  return (
+    <label style={{
+      display: "flex", alignItems: "center", gap: 12,
+      padding: "10px 14px", borderRadius: 9,
+      background: checked ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.02)",
+      border: `1px solid ${checked ? "rgba(34,197,94,0.3)" : BORDER}`,
+      cursor: "pointer", transition: "all 0.2s",
+    }}>
+      <div style={{
+        width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+        background: checked ? GREEN : "transparent",
+        border: `2px solid ${checked ? GREEN : BORDER}`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        transition: "all 0.15s",
+      }}>
+        {checked && (
+          <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+            <path d="M1 4l3 3 5-6" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} style={{ display: "none" }} />
+      <span style={{ fontSize: 13, color: checked ? "#fff" : MUTED, transition: "color 0.15s" }}>{children}</span>
+    </label>
+  )
+}
+
+function SummaryRow({ label, value, accent, large, border }: { label: string; value: string; accent?: string; large?: boolean; border?: boolean }) {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      paddingTop: border ? 10 : 0, borderTop: border ? `1px solid ${BORDER}` : "none",
+      marginTop: border ? 8 : 0,
+    }}>
+      <span style={{ fontSize: large ? 14 : 12, color: large ? MUTED : MUTED }}>{label}</span>
+      <span style={{ fontSize: large ? 16 : 13, fontWeight: large ? 800 : 600, color: accent || "#fff" }}>{value}</span>
+    </div>
+  )
 }
 
 export default function NewContractPage() {
@@ -47,67 +147,36 @@ export default function NewContractPage() {
   const [customerTier, setCustomerTier] = useState<any>(null)
   const [loadingTier, setLoadingTier] = useState(false)
 
-  // Form state
   const [formData, setFormData] = useState({
-    customer_id: "",
-    vehicle_id: "",
-    start_date: "",
-    end_date: "",
-    daily_rate: 0,
-    daily_km_limit: 300, // Default 300 km/day
-    deposit_amount: 0,
-    additional_charges: 0,
-    discount_amount: 0,
-    notes: "",
-    // Extras
-    gps: false,
-    child_seat: false,
-    additional_driver: false,
-    insurance_premium: false,
+    customer_id: "", vehicle_id: "", start_date: "", end_date: "",
+    daily_rate: 0, daily_km_limit: 300, deposit_amount: 0,
+    additional_charges: 0, discount_amount: 0, notes: "",
+    gps: false, child_seat: false, additional_driver: false, insurance_premium: false,
   })
 
-  // Calculated values
   const [calculations, setCalculations] = useState({
-    total_days: 0,
-    base_amount: 0,
-    extras_cost: 0,
-    subtotal: 0,
-    tax_amount: 0,
-    total_amount: 0,
-    // KM calculations
-    total_km_allowed: 0,
-    tier_km_bonus: 0,
-    effective_daily_limit: 0,
+    total_days: 0, base_amount: 0, extras_cost: 0, subtotal: 0,
+    tax_amount: 0, total_amount: 0,
+    total_km_allowed: 0, tier_km_bonus: 0, effective_daily_limit: 0,
   })
 
-  // Fetch customers and available vehicles
   useEffect(() => {
     const fetchData = async () => {
       try {
         const token = localStorage.getItem('accessToken')
-        const headers = {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        }
-
+        const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
         const [customersRes, vehiclesRes, profileRes] = await Promise.all([
           fetch(`${API_URL}/api/customers`, { headers }),
           fetch(`${API_URL}/api/vehicles?status=available`, { headers }),
           fetch(`${API_URL}/api/company/profile`, { headers }),
         ])
-
         const customersData = await customersRes.json()
         const vehiclesData = await vehiclesRes.json()
         const profileData = await profileRes.json()
-
         setCustomers(customersData.data.customers.filter((c: Customer) => !c.is_blacklisted))
         setVehicles(vehiclesData.data.vehicles)
-
-        // Default Daily KM Limit from company settings
         const defaultDailyKmLimit = profileData?.data?.company?.settings?.defaultDailyKmLimit
-        const dailyLimit = (typeof defaultDailyKmLimit === 'number' && defaultDailyKmLimit >= 50 && defaultDailyKmLimit <= 1000)
-          ? defaultDailyKmLimit
-          : 300
+        const dailyLimit = (typeof defaultDailyKmLimit === 'number' && defaultDailyKmLimit >= 50 && defaultDailyKmLimit <= 1000) ? defaultDailyKmLimit : 300
         setFormData(prev => ({ ...prev, daily_km_limit: dailyLimit }))
       } catch (error) {
         toast.error(t("failedToLoad"))
@@ -116,144 +185,72 @@ export default function NewContractPage() {
         setLoadingData(false)
       }
     }
-
     fetchData()
   }, [])
 
-  // Fetch customer tier when customer changes
   useEffect(() => {
     const fetchCustomerTier = async () => {
-      if (!formData.customer_id) {
-        setCustomerTier(null)
-        return
-      }
-
+      if (!formData.customer_id) { setCustomerTier(null); return }
       try {
         setLoadingTier(true)
         const response = await customerTierApi.getTierInfo(formData.customer_id)
         setCustomerTier(response.data)
-      } catch (error) {
-        console.error('Failed to fetch tier:', error)
-        setCustomerTier(null)
-      } finally {
-        setLoadingTier(false)
-      }
+      } catch (error) { console.error('Failed to fetch tier:', error); setCustomerTier(null) }
+      finally { setLoadingTier(false) }
     }
-
     fetchCustomerTier()
   }, [formData.customer_id])
 
-  // Auto-fill daily rate when vehicle is selected
   useEffect(() => {
     if (formData.vehicle_id) {
-      const selectedVehicle = vehicles.find(v => v.id === formData.vehicle_id)
-      if (selectedVehicle) {
-        setFormData(prev => ({
-          ...prev,
-          daily_rate: selectedVehicle.daily_rate,
-        }))
-      }
+      const sel = vehicles.find(v => v.id === formData.vehicle_id)
+      if (sel) setFormData(prev => ({ ...prev, daily_rate: sel.daily_rate }))
     }
   }, [formData.vehicle_id, vehicles])
 
-  // Calculate totals whenever relevant fields change
-  useEffect(() => {
-    calculateTotals()
-  }, [
-    formData.start_date,
-    formData.end_date,
-    formData.daily_rate,
-    formData.daily_km_limit,
-    formData.additional_charges,
-    formData.discount_amount,
-    formData.gps,
-    formData.child_seat,
-    formData.additional_driver,
-    formData.insurance_premium,
+  useEffect(() => { calculateTotals() }, [
+    formData.start_date, formData.end_date, formData.daily_rate, formData.daily_km_limit,
+    formData.additional_charges, formData.discount_amount,
+    formData.gps, formData.child_seat, formData.additional_driver, formData.insurance_premium,
     customerTier,
   ])
 
   const calculateTotals = () => {
-    if (!formData.start_date || !formData.end_date || !formData.daily_rate) {
-      return
-    }
-
+    if (!formData.start_date || !formData.end_date || !formData.daily_rate) return
     const start = new Date(formData.start_date)
     const end = new Date(formData.end_date)
     const totalDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1
-
-    if (totalDays <= 0) {
-      return
-    }
-
+    if (totalDays <= 0) return
     const baseAmount = formData.daily_rate * totalDays
-
-    // Calculate extras costs (per day)
     let extrasCost = 0
     if (formData.gps) extrasCost += 500 * totalDays
     if (formData.child_seat) extrasCost += 300 * totalDays
     if (formData.additional_driver) extrasCost += 1000 * totalDays
     if (formData.insurance_premium) extrasCost += 2000 * totalDays
-
     const subtotal = baseAmount + extrasCost + formData.additional_charges - formData.discount_amount
     const taxAmount = subtotal * 0.19
     const totalAmount = subtotal + taxAmount
-
-    // Calculate KM allowances with tier bonus
     const tierKmBonus = customerTier?.km_bonus || 0
     const effectiveDailyLimit = formData.daily_km_limit + tierKmBonus
     const totalKmAllowed = effectiveDailyLimit * totalDays
-
-    setCalculations({
-      total_days: totalDays,
-      base_amount: baseAmount,
-      extras_cost: extrasCost,
-      subtotal,
-      tax_amount: taxAmount,
-      total_amount: totalAmount,
-      total_km_allowed: totalKmAllowed,
-      tier_km_bonus: tierKmBonus,
-      effective_daily_limit: effectiveDailyLimit,
-    })
+    setCalculations({ total_days: totalDays, base_amount: baseAmount, extras_cost: extrasCost, subtotal, tax_amount: taxAmount, total_amount: totalAmount, total_km_allowed: totalKmAllowed, tier_km_bonus: tierKmBonus, effective_daily_limit: effectiveDailyLimit })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    if (!formData.customer_id || !formData.vehicle_id) {
-      toast.error(t("fillRequiredFields"))
-      return
-    }
-
-    if (new Date(formData.end_date) <= new Date(formData.start_date)) {
-      toast.error(`${t("endDate")} ${t("mustBeAfter")} ${t("startDate")}`)
-      return
-    }
-
+    if (!formData.customer_id || !formData.vehicle_id) { toast.error(t("fillRequiredFields")); return }
+    if (new Date(formData.end_date) <= new Date(formData.start_date)) { toast.error(`${t("endDate")} ${t("mustBeAfter")} ${t("startDate")}`); return }
     try {
       setLoading(true)
-
-      const extras = {
-        gps: formData.gps,
-        child_seat: formData.child_seat,
-        additional_driver: formData.additional_driver,
-        insurance_premium: formData.insurance_premium,
-      }
-
+      const extras = { gps: formData.gps, child_seat: formData.child_seat, additional_driver: formData.additional_driver, insurance_premium: formData.insurance_premium }
       const contractData = {
-        customer_id: formData.customer_id,
-        vehicle_id: formData.vehicle_id,
-        start_date: formData.start_date,
-        end_date: formData.end_date,
-        daily_rate: formData.daily_rate,
-        daily_km_limit: formData.daily_km_limit,
+        customer_id: formData.customer_id, vehicle_id: formData.vehicle_id,
+        start_date: formData.start_date, end_date: formData.end_date,
+        daily_rate: formData.daily_rate, daily_km_limit: formData.daily_km_limit,
         deposit_amount: formData.deposit_amount,
         additional_charges: formData.additional_charges + calculations.extras_cost,
-        discount_amount: formData.discount_amount,
-        extras,
-        notes: formData.notes,
+        discount_amount: formData.discount_amount, extras, notes: formData.notes,
       }
-
       await contractApi.create(contractData)
       toast.success(t("contractCreated"))
       router.push("/dashboard/contracts")
@@ -266,360 +263,269 @@ export default function NewContractPage() {
 
   if (loadingData) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div style={{ display: "flex", justifyContent: "center", padding: "64px 0" }}>
+        <div style={{ width: 40, height: 40, borderRadius: "50%", border: `3px solid rgba(255,255,255,0.07)`, borderTopColor: GREEN, animation: "spin 0.8s linear infinite" }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => router.back()}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
+    <div style={{ fontFamily: FONT, color: "#fff", minHeight: "100vh", padding: "32px 0" }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 32 }}>
+        <button onClick={() => router.back()}
+          style={{
+            width: 36, height: 36, borderRadius: 10, border: `1px solid ${BORDER}`,
+            background: SURFACE, color: MUTED, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(34,197,94,0.3)"; e.currentTarget.style.color = "#fff" }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.color = MUTED }}
+        >
+          <ArrowLeft size={16} />
+        </button>
         <div>
-          <h1 className="text-3xl font-bold">{t("newContract")}</h1>
-          <p className="text-muted-foreground">{t("createContract")}</p>
+          <h1 style={{ fontSize: "clamp(1.5rem,3vw,2rem)", fontWeight: 800, letterSpacing: "-0.035em", marginBottom: 4 }}>
+            {t("newContract")}
+          </h1>
+          <p style={{ fontSize: 13, color: MUTED }}>{t("createContract")}</p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Form */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Customer & Vehicle Selection */}
-          <div className="p-6 rounded-lg border bg-card">
-            <h2 className="text-lg font-semibold mb-4">{t("contractInformation")}</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Customer */}
-              <div>
-                <Label htmlFor="customer_id">{t("customer")} *</Label>
-                <select
-                  id="customer_id"
-                  className="w-full mt-1 px-3 py-2 border rounded-md bg-background"
-                  value={formData.customer_id}
-                  onChange={(e) => setFormData({ ...formData, customer_id: e.target.value })}
-                  required
-                >
-                  <option value="">{t("selectCustomer")}</option>
-                  {customers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.full_name} - {customer.phone}
-                      {customer.total_rentals ? ` (${customer.total_rentals} rentals)` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
+      <form onSubmit={handleSubmit}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20, alignItems: "start" }}>
 
-              {/* Vehicle */}
-              <div>
-                <Label htmlFor="vehicle_id">{t("vehicle")} *</Label>
-                <select
-                  id="vehicle_id"
-                  className="w-full mt-1 px-3 py-2 border rounded-md bg-background"
-                  value={formData.vehicle_id}
-                  onChange={(e) => setFormData({ ...formData, vehicle_id: e.target.value })}
-                  required
-                >
-                  <option value="">{t("selectVehicle")}</option>
-                  {vehicles.map((vehicle) => (
-                    <option key={vehicle.id} value={vehicle.id}>
-                      {vehicle.brand} {vehicle.model} ({vehicle.registration_number}) - {vehicle.daily_rate.toLocaleString()} DZD/day
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+          {/* ── Left column ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-            {/* Customer Tier Display */}
-            {customerTier && (
-              <div className="mt-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-950">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Customer Loyalty Tier:</span>
-                  <CustomerTierBadge 
-                    tier={customerTier.tier}
-                    tierName={customerTier.name}
-                  />
+            {/* Customer & Vehicle */}
+            <SectionCard title={t("contractInformation")}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <div>
+                  <FieldLabel>{t("customer")} *</FieldLabel>
+                  <StyledSelect
+                    id="customer_id" value={formData.customer_id} required
+                    onChange={e => setFormData({ ...formData, customer_id: e.target.value })}
+                  >
+                    <option value="">{t("selectCustomer")}</option>
+                    {customers.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.full_name} - {c.phone}{c.total_rentals ? ` (${c.total_rentals} rentals)` : ''}
+                      </option>
+                    ))}
+                  </StyledSelect>
                 </div>
-                {customerTier.km_bonus > 0 && (
-                  <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-                    ✨ This customer gets +{customerTier.km_bonus} km/day bonus!
-                  </p>
-                )}
+                <div>
+                  <FieldLabel>{t("vehicle")} *</FieldLabel>
+                  <StyledSelect
+                    id="vehicle_id" value={formData.vehicle_id} required
+                    onChange={e => setFormData({ ...formData, vehicle_id: e.target.value })}
+                  >
+                    <option value="">{t("selectVehicle")}</option>
+                    {vehicles.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.brand} {v.model} ({v.registration_number}) - {v.daily_rate.toLocaleString()} DZD/day
+                      </option>
+                    ))}
+                  </StyledSelect>
+                </div>
               </div>
-            )}
-          </div>
 
-          {/* Dates & Rates */}
-          <div className="p-6 rounded-lg border bg-card">
-            <h2 className="text-lg font-semibold mb-4">{t("rentalDates")}</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="start_date">{t("pickupDate")} *</Label>
-                <Input
-                  id="start_date"
-                  type="date"
-                  value={formData.start_date}
-                  onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="end_date">{t("returnDate")} *</Label>
-                <Input
-                  id="end_date"
-                  type="date"
-                  value={formData.end_date}
-                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="daily_rate">{t("dailyRate")} (DZD) *</Label>
-                <Input
-                  id="daily_rate"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={formData.daily_rate}
-                  onChange={(e) => setFormData({ ...formData, daily_rate: parseFloat(e.target.value) || 0 })}
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="daily_km_limit">
-                  Daily KM Limit (km/day) *
-                </Label>
-                <Input
-                  id="daily_km_limit"
-                  type="number"
-                  min="50"
-                  step="50"
-                  value={formData.daily_km_limit}
-                  onChange={(e) => setFormData({ ...formData, daily_km_limit: parseInt(e.target.value) || formData.daily_km_limit })}
-                  required
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  From company settings (Base limit before tier bonuses)
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* KM Allowance Info */}
-          {calculations.total_days > 0 && (
-            <Alert className="mt-4">
-              <Info className="w-4 h-4" />
-              <AlertDescription>
-                <div className="text-sm space-y-1">
-                  <p className="font-semibold">Total KM Allowance:</p>
-                  <p>
-                    Base: {formData.daily_km_limit} km/day × {calculations.total_days} days = 
-                    <strong> {(formData.daily_km_limit * calculations.total_days).toLocaleString()} km</strong>
-                  </p>
-                  {calculations.tier_km_bonus > 0 && (
-                    <>
-                      <p className="text-blue-600">
-                        Tier Bonus: +{calculations.tier_km_bonus} km/day × {calculations.total_days} days = 
-                        <strong> +{(calculations.tier_km_bonus * calculations.total_days).toLocaleString()} km</strong>
-                      </p>
-                      <p className="font-bold text-lg pt-2">
-                        Total Allowed: {calculations.total_km_allowed.toLocaleString()} km
-                      </p>
-                    </>
+              {customerTier && (
+                <div style={{
+                  marginTop: 14, padding: "12px 14px", borderRadius: 10,
+                  background: "rgba(56,189,248,0.06)", border: "1px solid rgba(56,189,248,0.2)",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: customerTier.km_bonus > 0 ? 8 : 0 }}>
+                    <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>Customer Loyalty Tier:</span>
+                    <CustomerTierBadge tier={customerTier.tier} tierName={customerTier.name} />
+                  </div>
+                  {customerTier.km_bonus > 0 && (
+                    <p style={{ fontSize: 12, color: "#38BDF8" }}>
+                      ✨ This customer gets +{customerTier.km_bonus} km/day bonus!
+                    </p>
                   )}
                 </div>
-              </AlertDescription>
-            </Alert>
-          )}
-        </div>
-
-          {/* Extras */}
-          <div className="p-6 rounded-lg border bg-card">
-            <h2 className="text-lg font-semibold mb-4">{t("extras")}</h2>
-            <div className="space-y-3">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.gps}
-                  onChange={(e) => setFormData({ ...formData, gps: e.target.checked })}
-                  className="w-4 h-4"
-                />
-                <span>{t("gpsNavigation")} (+500 DZD/day)</span>
-              </label>
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.child_seat}
-                  onChange={(e) => setFormData({ ...formData, child_seat: e.target.checked })}
-                  className="w-4 h-4"
-                />
-                <span>{t("childSeat")} (+300 DZD/day)</span>
-              </label>
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.additional_driver}
-                  onChange={(e) => setFormData({ ...formData, additional_driver: e.target.checked })}
-                  className="w-4 h-4"
-                />
-                <span>{t("additionalDriver")} (+1,000 DZD/day)</span>
-              </label>
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.insurance_premium}
-                  onChange={(e) => setFormData({ ...formData, insurance_premium: e.target.checked })}
-                  className="w-4 h-4"
-                />
-                <span>{t("premiumInsurance")} (+2,000 DZD/day)</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Financial Details */}
-          <div className="p-6 rounded-lg border bg-card">
-            <h2 className="text-lg font-semibold mb-4">Financial Details</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="deposit_amount">{t("deposit")} (DZD)</Label>
-                <Input
-                  id="deposit_amount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={formData.deposit_amount}
-                  onChange={(e) => setFormData({ ...formData, deposit_amount: parseFloat(e.target.value) || 0 })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="additional_charges">{t("additionalCharges")} (DZD)</Label>
-                <Input
-                  id="additional_charges"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={formData.additional_charges}
-                  onChange={(e) => setFormData({ ...formData, additional_charges: parseFloat(e.target.value) || 0 })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="discount_amount">{t("discount")} (DZD)</Label>
-                <Input
-                  id="discount_amount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={formData.discount_amount}
-                  onChange={(e) => setFormData({ ...formData, discount_amount: parseFloat(e.target.value) || 0 })}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div className="p-6 rounded-lg border bg-card">
-            <h2 className="text-lg font-semibold mb-4">{t("notes")}</h2>
-            <Textarea
-              placeholder="Add any special terms, conditions, or notes..."
-              rows={4}
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            />
-          </div>
-
-        {/* Summary Panel */}
-        <div className="lg:col-span-1">
-          <div className="p-6 rounded-lg border bg-card sticky top-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Calculator className="w-5 h-5 text-primary" />
-              <h2 className="text-lg font-semibold">{t("estimatedTotal")}</h2>
-            </div>
-
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t("totalDays")}:</span>
-                <span className="font-semibold">{calculations.total_days || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t("baseAmount")}:</span>
-                <span>{calculations.base_amount.toLocaleString()} DZD</span>
-              </div>
-              {calculations.extras_cost > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("extras")}:</span>
-                  <span>{calculations.extras_cost.toLocaleString()} DZD</span>
-                </div>
               )}
-              {formData.additional_charges > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("additionalCharges")}:</span>
-                  <span>{formData.additional_charges.toLocaleString()} DZD</span>
-                </div>
-              )}
-              {formData.discount_amount > 0 && (
-                <div className="flex justify-between text-green-600">
-                  <span>{t("discount")}:</span>
-                  <span>-{formData.discount_amount.toLocaleString()} DZD</span>
-                </div>
-              )}
-              <div className="border-t pt-2 flex justify-between">
-                <span className="text-muted-foreground">Subtotal:</span>
-                <span>{calculations.subtotal.toLocaleString()} DZD</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t("tax")}:</span>
-                <span>{calculations.tax_amount.toLocaleString()} DZD</span>
-              </div>
-              <div className="border-t pt-2 flex justify-between text-lg font-bold">
-                <span>{t("totalAmount")}:</span>
-                <span className="text-primary">{calculations.total_amount.toLocaleString()} DZD</span>
-              </div>
-              {formData.deposit_amount > 0 && (
-                <div className="flex justify-between text-amber-600">
-                  <span>{t("deposit")} {t("required")}:</span>
-                  <span>{formData.deposit_amount.toLocaleString()} DZD</span>
-                </div>
-              )}
+            </SectionCard>
 
-              {/* KM Summary */}
+            {/* Dates & Rates */}
+            <SectionCard title={t("rentalDates")}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <div>
+                  <FieldLabel>{t("pickupDate")} *</FieldLabel>
+                  <StyledInput type="date" value={formData.start_date} required
+                    onChange={e => setFormData({ ...formData, start_date: e.target.value })} />
+                </div>
+                <div>
+                  <FieldLabel>{t("returnDate")} *</FieldLabel>
+                  <StyledInput type="date" value={formData.end_date} required
+                    onChange={e => setFormData({ ...formData, end_date: e.target.value })} />
+                </div>
+                <div>
+                  <FieldLabel>{t("dailyRate")} (DZD) *</FieldLabel>
+                  <StyledInput type="number" min="0" step="0.01" value={formData.daily_rate} required
+                    onChange={e => setFormData({ ...formData, daily_rate: parseFloat(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <FieldLabel>Daily KM Limit (km/day) *</FieldLabel>
+                  <StyledInput type="number" min="50" step="50" value={formData.daily_km_limit} required
+                    onChange={e => setFormData({ ...formData, daily_km_limit: parseInt(e.target.value) || formData.daily_km_limit })} />
+                  <p style={{ fontSize: 11, color: MUTED, marginTop: 5 }}>From company settings (Base limit before tier bonuses)</p>
+                </div>
+              </div>
+
               {calculations.total_days > 0 && (
-                <div className="border-t pt-3 mt-3">
-                  <p className="font-semibold text-blue-600 mb-2">KM Allowance</p>
-                  <div className="space-y-1 text-xs">
-                    <div className="flex justify-between">
-                      <span>Daily Limit:</span>
-                      <span>{formData.daily_km_limit} km/day</span>
-                    </div>
+                <div style={{
+                  marginTop: 14, padding: "14px 16px", borderRadius: 10,
+                  background: "rgba(56,189,248,0.05)", border: "1px solid rgba(56,189,248,0.15)",
+                  display: "flex", alignItems: "flex-start", gap: 10,
+                }}>
+                  <Info size={15} style={{ color: "#38BDF8", marginTop: 1, flexShrink: 0 }} />
+                  <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+                    <p style={{ fontWeight: 600, marginBottom: 4, color: "#fff" }}>Total KM Allowance:</p>
+                    <p style={{ color: MUTED }}>
+                      Base: {formData.daily_km_limit} km/day × {calculations.total_days} days =&nbsp;
+                      <strong style={{ color: "#fff" }}>{(formData.daily_km_limit * calculations.total_days).toLocaleString()} km</strong>
+                    </p>
                     {calculations.tier_km_bonus > 0 && (
-                      <div className="flex justify-between text-blue-600">
-                        <span>Tier Bonus:</span>
-                        <span>+{calculations.tier_km_bonus} km/day</span>
-                      </div>
+                      <>
+                        <p style={{ color: "#38BDF8" }}>
+                          Tier Bonus: +{calculations.tier_km_bonus} km/day × {calculations.total_days} days =&nbsp;
+                          <strong>+{(calculations.tier_km_bonus * calculations.total_days).toLocaleString()} km</strong>
+                        </p>
+                        <p style={{ fontWeight: 700, fontSize: 13, color: "#fff", marginTop: 4 }}>
+                          Total Allowed: {calculations.total_km_allowed.toLocaleString()} km
+                        </p>
+                      </>
                     )}
-                    <div className="flex justify-between font-semibold">
-                      <span>Total Allowed:</span>
-                      <span>{calculations.total_km_allowed.toLocaleString()} km</span>
-                    </div>
                   </div>
                 </div>
               )}
-            </div>
+            </SectionCard>
 
-            <Button type="submit" className="w-full mt-6" disabled={loading}>
-              {loading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                  {t("saving")}
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4 mr-2" />
-                  {t("createContract")}
-                </>
+            {/* Extras */}
+            <SectionCard title={t("extras")}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <CheckRow checked={formData.gps} onChange={v => setFormData({ ...formData, gps: v })}>
+                  {t("gpsNavigation")} <span style={{ color: MUTED }}>+500 DZD/day</span>
+                </CheckRow>
+                <CheckRow checked={formData.child_seat} onChange={v => setFormData({ ...formData, child_seat: v })}>
+                  {t("childSeat")} <span style={{ color: MUTED }}>+300 DZD/day</span>
+                </CheckRow>
+                <CheckRow checked={formData.additional_driver} onChange={v => setFormData({ ...formData, additional_driver: v })}>
+                  {t("additionalDriver")} <span style={{ color: MUTED }}>+1,000 DZD/day</span>
+                </CheckRow>
+                <CheckRow checked={formData.insurance_premium} onChange={v => setFormData({ ...formData, insurance_premium: v })}>
+                  {t("premiumInsurance")} <span style={{ color: MUTED }}>+2,000 DZD/day</span>
+                </CheckRow>
+              </div>
+            </SectionCard>
+
+            {/* Financial Details */}
+            <SectionCard title="Financial Details">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+                <div>
+                  <FieldLabel>{t("deposit")} (DZD)</FieldLabel>
+                  <StyledInput type="number" min="0" step="0.01" value={formData.deposit_amount}
+                    onChange={e => setFormData({ ...formData, deposit_amount: parseFloat(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <FieldLabel>{t("additionalCharges")} (DZD)</FieldLabel>
+                  <StyledInput type="number" min="0" step="0.01" value={formData.additional_charges}
+                    onChange={e => setFormData({ ...formData, additional_charges: parseFloat(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <FieldLabel>{t("discount")} (DZD)</FieldLabel>
+                  <StyledInput type="number" min="0" step="0.01" value={formData.discount_amount}
+                    onChange={e => setFormData({ ...formData, discount_amount: parseFloat(e.target.value) || 0 })} />
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* Notes */}
+            <SectionCard title={t("notes")}>
+              <textarea
+                placeholder="Add any special terms, conditions, or notes..."
+                rows={4}
+                value={formData.notes}
+                onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                style={{
+                  width: "100%", padding: "11px 13px", borderRadius: 9,
+                  border: `1px solid ${BORDER}`, background: "rgba(255,255,255,0.03)",
+                  color: "#fff", fontFamily: FONT, fontSize: 13, resize: "vertical",
+                  outline: "none", transition: "border-color 0.2s", lineHeight: 1.6,
+                }}
+                onFocus={e => (e.currentTarget.style.borderColor = "rgba(34,197,94,0.4)")}
+                onBlur={e => (e.currentTarget.style.borderColor = BORDER)}
+              />
+            </SectionCard>
+          </div>
+
+          {/* ── Right column — Summary ── */}
+          <div style={{ position: "sticky", top: 24 }}>
+            <div style={{ padding: "24px 22px", borderRadius: 14, background: SURFACE, border: `1px solid ${BORDER}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+                <Calculator size={16} style={{ color: GREEN }} />
+                <h2 style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.015em" }}>{t("estimatedTotal")}</h2>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <SummaryRow label={`${t("totalDays")}:`} value={String(calculations.total_days || 0)} />
+                <SummaryRow label={`${t("baseAmount")}:`} value={`${calculations.base_amount.toLocaleString()} DZD`} />
+                {calculations.extras_cost > 0 && <SummaryRow label={`${t("extras")}:`} value={`${calculations.extras_cost.toLocaleString()} DZD`} />}
+                {formData.additional_charges > 0 && <SummaryRow label={`${t("additionalCharges")}:`} value={`${formData.additional_charges.toLocaleString()} DZD`} />}
+                {formData.discount_amount > 0 && <SummaryRow label={`${t("discount")}:`} value={`-${formData.discount_amount.toLocaleString()} DZD`} accent="#4ADE80" />}
+                <SummaryRow label="Subtotal:" value={`${calculations.subtotal.toLocaleString()} DZD`} border />
+                <SummaryRow label={`${t("tax")}:`} value={`${calculations.tax_amount.toLocaleString()} DZD`} />
+                <SummaryRow label={`${t("totalAmount")}:`} value={`${calculations.total_amount.toLocaleString()} DZD`} accent={GREEN} large border />
+                {formData.deposit_amount > 0 && (
+                  <SummaryRow label={`${t("deposit")} ${t("required")}:`} value={`${formData.deposit_amount.toLocaleString()} DZD`} accent="#FB923C" />
+                )}
+              </div>
+
+              {/* KM Summary */}
+              {calculations.total_days > 0 && (
+                <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${BORDER}` }}>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "#38BDF8", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    KM Allowance
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    <SummaryRow label="Daily Limit:" value={`${formData.daily_km_limit} km/day`} />
+                    {calculations.tier_km_bonus > 0 && (
+                      <SummaryRow label="Tier Bonus:" value={`+${calculations.tier_km_bonus} km/day`} accent="#38BDF8" />
+                    )}
+                    <SummaryRow label="Total Allowed:" value={`${calculations.total_km_allowed.toLocaleString()} km`} />
+                  </div>
+                </div>
               )}
-            </Button>
+
+              <button type="submit" disabled={loading}
+                style={{
+                  width: "100%", marginTop: 20, padding: "12px 0", borderRadius: 10,
+                  border: "none", cursor: loading ? "not-allowed" : "pointer",
+                  background: loading ? "rgba(34,197,94,0.4)" : GREEN,
+                  color: "#fff", fontFamily: FONT, fontWeight: 600, fontSize: 14,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  transition: "all 0.2s",
+                  boxShadow: "0 0 20px rgba(34,197,94,0.2)",
+                }}
+                onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "#16A34A" }}
+                onMouseLeave={e => { if (!loading) e.currentTarget.style.background = GREEN }}
+              >
+                {loading ? (
+                  <>
+                    <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", animation: "spin 0.8s linear infinite" }} />
+                    {t("saving")}
+                  </>
+                ) : (
+                  <><Save size={15} />{t("createContract")}</>
+                )}
+              </button>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
           </div>
         </div>
       </form>

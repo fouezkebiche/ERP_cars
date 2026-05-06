@@ -365,6 +365,14 @@
       "generate": "إنشاء تقرير",
       "generating": "جاري الإنشاء...",
       "error": "خطأ"
+    },
+    "periodSelector": {
+      "period": "الفترة",
+      "today": "اليوم",
+      "week": "الأسبوع",
+      "month": "الشهر",
+      "quarter": "الربع",
+      "year": "السنة"
     }
   },
   "attendance": {
@@ -829,6 +837,7 @@
     "extend": "تمديد",
     "cancelContract": "إلغاء",
     "viewPDF": "عرض PDF",
+    "downloadPDF": "تحميل PDF",
     "loading": "جاري تحميل العقود...",
     "failedToLoad": "فشل في تحميل العقود",
     "deleteConfirm": "هل أنت متأكد من أنك تريد حذف العقد {contractNumber}؟ لا يمكن التراجع عن هذا الإجراء.",
@@ -872,6 +881,7 @@
     "createdBy": "أنشأه",
     "none": "لا شيء",
     "pdfOpened": "تم فتح PDF في علامة تبويب جديدة. استخدم طباعة المتصفح (Ctrl+P) لحفظ ك PDF إذا لزم الأمر.",
+    "contractDownloaded": "تم تحميل العقد بنجاح",
     "allowPopups": "يرجى السماح بالنوافذ المنبثقة لعرض PDF",
     "contractStatus": {
       "active": "نشط",

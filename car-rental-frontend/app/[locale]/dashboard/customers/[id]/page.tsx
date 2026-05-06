@@ -4,26 +4,67 @@
 import { useState, useEffect } from "react"
 import { useTranslations } from "next-intl"
 import { useParams, useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
 import { DataTable } from "@/components/dashboard/data-table"
 import { StatusBadge } from "@/components/dashboard/status-badge"
 import { CustomerTierBadge } from "@/components/dashboard/CustomerTierBadge"
 import {
-  ArrowLeft,
-  Edit2,
-  Mail,
-  Phone,
-  MapPin,
-  Calendar,
-  CreditCard,
-  AlertTriangle,
-  User,
-  Building2,
-  FileText,
+  ArrowLeft, Edit2, Mail, Phone, MapPin, Calendar,
+  CreditCard, AlertTriangle, User, Building2, FileText,
 } from "lucide-react"
 import { customerApi, Customer, CustomerHistory } from "@/lib/customerApi"
 import { customerTierApi } from "@/lib/customerTierApi"
 import toast from "react-hot-toast"
+
+/* ─── design tokens ─────────────────────────────────────────── */
+const FONT    = "'Plus Jakarta Sans', system-ui, sans-serif"
+const GREEN   = "#22C55E"
+const SURFACE = "rgba(255,255,255,0.04)"
+const BORDER  = "rgba(255,255,255,0.07)"
+const MUTED   = "rgba(255,255,255,0.4)"
+
+/* ─── helpers ────────────────────────────────────────────────── */
+function SectionCard({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div style={{ padding: "24px 26px", borderRadius: 14, background: SURFACE, border: `1px solid ${BORDER}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 18 }}>
+        {icon && <span style={{ color: MUTED }}>{icon}</span>}
+        <h3 style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.015em", color: "#fff" }}>{title}</h3>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function InfoRow({ label, value, children }: { label: string; value?: string; children?: React.ReactNode }) {
+  return (
+    <div>
+      <p style={{ fontSize: 11, color: MUTED, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</p>
+      {value && <p style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{value}</p>}
+      {children}
+    </div>
+  )
+}
+
+function ContactRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+      <div style={{ marginTop: 2, color: MUTED, flexShrink: 0 }}>{icon}</div>
+      <div>
+        <p style={{ fontSize: 11, color: MUTED, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</p>
+        <p style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{value}</p>
+      </div>
+    </div>
+  )
+}
+
+function StatCard({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
+  return (
+    <div style={{ padding: "16px 18px", borderRadius: 11, background: "rgba(255,255,255,0.03)", border: `1px solid ${BORDER}` }}>
+      <p style={{ fontSize: 11, color: MUTED, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</p>
+      <p style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.035em", color: accent || "#fff" }}>{value}</p>
+    </div>
+  )
+}
 
 export default function CustomerDetailPage() {
   const t = useTranslations("customers")
@@ -45,17 +86,12 @@ export default function CustomerDetailPage() {
           customerApi.getById(customerId),
           customerApi.getHistory(customerId),
         ])
-
         setCustomer(customerRes.data.customer)
         setHistory(historyRes.data)
-        
-        // Fetch tier info
         try {
           const tierRes = await customerTierApi.getTierInfo(customerId)
           setTierInfo(tierRes.data)
-        } catch (err) {
-          console.error('Failed to fetch tier:', err)
-        }
+        } catch (err) { console.error('Failed to fetch tier:', err) }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : t("failedToLoad"))
         router.push("/dashboard/customers")
@@ -63,344 +99,286 @@ export default function CustomerDetailPage() {
         setLoading(false)
       }
     }
-
     fetchData()
   }, [customerId, router, t])
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div style={{ display: "flex", justifyContent: "center", padding: "64px 0" }}>
+        <div style={{ width: 40, height: 40, borderRadius: "50%", border: `3px solid ${BORDER}`, borderTopColor: GREEN, animation: "spin 0.8s linear infinite" }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     )
   }
 
-  if (!customer) {
-    return null
-  }
+  if (!customer) return null
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
+    <div style={{ fontFamily: FONT, color: "#fff", minHeight: "100vh", padding: "32px 0" }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* ── Header ── */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <button onClick={() => router.back()}
+            style={{
+              width: 36, height: 36, borderRadius: 10, border: `1px solid ${BORDER}`,
+              background: SURFACE, color: MUTED, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(34,197,94,0.3)"; e.currentTarget.style.color = "#fff" }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.color = MUTED }}
+          >
+            <ArrowLeft size={16} />
+          </button>
           <div>
-            <h1 className="text-3xl font-bold">{customer.full_name}</h1>
-            <p className="text-muted-foreground">
+            <h1 style={{ fontSize: "clamp(1.5rem,3vw,2rem)", fontWeight: 800, letterSpacing: "-0.035em", marginBottom: 4 }}>
+              {customer.full_name}
+            </h1>
+            <p style={{ fontSize: 13, color: MUTED }}>
               {customer.customer_type === "corporate" ? t("corporate") : t("individual")}
             </p>
           </div>
         </div>
-        <Button onClick={() => router.push(`/dashboard/customers/${customerId}/edit`)}>
-          <Edit2 className="w-4 h-4 mr-2" />
-          {t("edit")}
-        </Button>
+        <button
+          onClick={() => router.push(`/dashboard/customers/${customerId}/edit`)}
+          style={{
+            fontFamily: FONT, fontSize: 13, fontWeight: 600,
+            padding: "9px 18px", borderRadius: 9,
+            border: `1px solid ${BORDER}`, background: SURFACE, color: MUTED,
+            cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7,
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(34,197,94,0.3)"; e.currentTarget.style.color = "#fff" }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.color = MUTED }}
+        >
+          <Edit2 size={14} /> {t("edit")}
+        </button>
       </div>
 
-      {/* Status Alert */}
+      {/* ── Blacklist Alert ── */}
       {customer.is_blacklisted && (
-        <div className="p-4 rounded-lg border-l-4 border-l-destructive bg-destructive/10">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-destructive" />
-            <p className="font-semibold text-sm">{t("blacklistedLabel")}</p>
+        <div style={{
+          padding: "14px 16px", borderRadius: 10, marginBottom: 20,
+          background: "rgba(239,68,68,0.07)", borderLeft: "3px solid #EF4444",
+          border: "1px solid rgba(239,68,68,0.2)",
+          display: "flex", alignItems: "flex-start", gap: 10,
+        }}>
+          <AlertTriangle size={16} style={{ color: "#EF4444", marginTop: 1, flexShrink: 0 }} />
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 700, color: "#F87171", marginBottom: 3 }}>{t("blacklistedLabel")}</p>
+            <p style={{ fontSize: 12, color: MUTED }}>Cannot create new contracts for this customer</p>
           </div>
-          <p className="text-sm text-muted-foreground mt-1">
-            Cannot create new contracts for this customer
-          </p>
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="border-b border-border">
-        <div className="flex gap-4">
-          <button
-            className={`px-4 py-2 border-b-2 transition-colors ${
-              activeTab === "details"
-                ? "border-primary text-primary font-semibold"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-            onClick={() => setActiveTab("details")}
+      {/* ── Tabs ── */}
+      <div style={{ borderBottom: `1px solid ${BORDER}`, marginBottom: 24, display: "flex", gap: 4 }}>
+        {([
+          { key: "details", label: t("customerDetails") },
+          { key: "history", label: `${t("rentalHistory")} (${history?.stats.total_contracts || 0})` },
+        ] as const).map(tab => (
+          <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+            style={{
+              fontFamily: FONT, fontSize: 13, fontWeight: 600,
+              padding: "10px 18px", background: "transparent", border: "none",
+              borderBottom: `2px solid ${activeTab === tab.key ? GREEN : "transparent"}`,
+              color: activeTab === tab.key ? GREEN : MUTED,
+              cursor: "pointer", transition: "all 0.2s", marginBottom: -1,
+            }}
+            onMouseEnter={e => { if (activeTab !== tab.key) e.currentTarget.style.color = "#fff" }}
+            onMouseLeave={e => { if (activeTab !== tab.key) e.currentTarget.style.color = MUTED }}
           >
-            {t("customerDetails")}
+            {tab.label}
           </button>
-          <button
-            className={`px-4 py-2 border-b-2 transition-colors ${
-              activeTab === "history"
-                ? "border-primary text-primary font-semibold"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-            onClick={() => setActiveTab("history")}
-          >
-            {t("rentalHistory")} ({history?.stats.total_contracts || 0})
-          </button>
-        </div>
+        ))}
       </div>
 
-      {/* Content */}
-      {activeTab === "details" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Info */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Loyalty Program */}
+      {/* ════════ DETAILS TAB ════════ */}
+      {activeTab === "details" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 16, alignItems: "start" }}>
+
+          {/* ── Left ── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+            {/* Loyalty */}
             {tierInfo && (
-              <div className="p-6 rounded-lg border border-border bg-card">
-                <h3 className="font-semibold mb-4">Loyalty Program</h3>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Apply tier discount:</span>
-                    <span className={`text-sm font-semibold ${customer.apply_tier_discount !== false ? "text-green-600" : "text-muted-foreground"}`}>
+              <SectionCard title="Loyalty Program">
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 13, color: MUTED }}>Apply tier discount:</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: customer.apply_tier_discount !== false ? GREEN : MUTED }}>
                       {customer.apply_tier_discount !== false ? "Yes" : "No"}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Current Tier:</span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 13, color: MUTED }}>Current Tier:</span>
                     <CustomerTierBadge tier={tierInfo.tier} tierName={tierInfo.name} />
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Overage Rate:</span>
-                    <span className="font-semibold">{tierInfo.overage_rate} DZD/km</span>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 13, color: MUTED }}>Overage Rate:</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{tierInfo.overage_rate} DZD/km</span>
                   </div>
                   {tierInfo.km_bonus > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">KM Bonus:</span>
-                      <span className="font-semibold text-green-600">+{tierInfo.km_bonus} km/day</span>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 13, color: MUTED }}>KM Bonus:</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: GREEN }}>+{tierInfo.km_bonus} km/day</span>
                     </div>
                   )}
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Discount:</span>
-                    <span className="font-semibold">{tierInfo.discount_percentage}% on overages</span>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 13, color: MUTED }}>Discount:</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{tierInfo.discount_percentage}% on overages</span>
                   </div>
+
                   {tierInfo.progress && !tierInfo.progress.is_max_tier && (
-                    <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-950 rounded">
-                      <p className="text-xs text-blue-700 dark:text-blue-300">
+                    <div style={{ marginTop: 4, padding: "12px 14px", borderRadius: 10, background: "rgba(56,189,248,0.06)", border: "1px solid rgba(56,189,248,0.18)" }}>
+                      <p style={{ fontSize: 12, color: "#38BDF8", marginBottom: 8 }}>
                         {tierInfo.progress.rentals_to_next_tier} more rental{tierInfo.progress.rentals_to_next_tier > 1 ? 's' : ''} to reach {tierInfo.progress.next_tier_name}!
                       </p>
-                      <div className="w-full h-2 bg-blue-200 rounded-full mt-2">
-                        <div 
-                          className="h-full bg-blue-600 rounded-full" 
-                          style={{ width: `${tierInfo.progress.progress_percentage}%` }}
-                        />
+                      <div style={{ width: "100%", height: 5, background: "rgba(56,189,248,0.15)", borderRadius: 999 }}>
+                        <div style={{ height: "100%", background: "#38BDF8", borderRadius: 999, width: `${tierInfo.progress.progress_percentage}%`, transition: "width 0.5s" }} />
                       </div>
                     </div>
                   )}
-                  <div className="mt-4 pt-4 border-t">
-                    <p className="text-xs font-semibold mb-2">Benefits:</p>
-                    <ul className="text-xs text-muted-foreground space-y-1">
+
+                  <div style={{ marginTop: 4, paddingTop: 14, borderTop: `1px solid ${BORDER}` }}>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: MUTED, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Benefits:</p>
+                    <ul style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                       {tierInfo.benefits.map((benefit: string, i: number) => (
-                        <li key={i}>• {benefit}</li>
+                        <li key={i} style={{ fontSize: 13, color: MUTED, display: "flex", alignItems: "center", gap: 7 }}>
+                          <span style={{ width: 5, height: 5, borderRadius: "50%", background: GREEN, display: "inline-block", flexShrink: 0 }} />
+                          {benefit}
+                        </li>
                       ))}
                     </ul>
                   </div>
                 </div>
-              </div>
+              </SectionCard>
             )}
 
-            {/* Contact Information */}
-            <div className="p-6 rounded-lg border border-border bg-card">
-              <h3 className="font-semibold mb-4 flex items-center gap-2">
-                <User className="w-5 h-5" />
-                {t("contactInfo")}
-              </h3>
-              <div className="space-y-4">
-                {customer.email && (
-                  <div className="flex items-start gap-3">
-                    <Mail className="w-5 h-5 text-muted-foreground mt-0.5" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">{t("email")}</p>
-                      <p className="font-medium">{customer.email}</p>
-                    </div>
-                  </div>
-                )}
-                <div className="flex items-start gap-3">
-                  <Phone className="w-5 h-5 text-muted-foreground mt-0.5" />
-                  <div>
-                    <p className="text-sm text-muted-foreground">{t("phone")}</p>
-                    <p className="font-medium">{customer.phone}</p>
-                  </div>
-                </div>
+            {/* Contact */}
+            <SectionCard title={t("contactInfo")} icon={<User size={15} />}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {customer.email && <ContactRow icon={<Mail size={15} />} label={t("email")} value={customer.email} />}
+                <ContactRow icon={<Phone size={15} />} label={t("phone")} value={customer.phone} />
                 {customer.address && (
-                  <div className="flex items-start gap-3">
-                    <MapPin className="w-5 h-5 text-muted-foreground mt-0.5" />
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <MapPin size={15} style={{ color: MUTED, marginTop: 2, flexShrink: 0 }} />
                     <div>
-                      <p className="text-sm text-muted-foreground">{t("address")}</p>
-                      <p className="font-medium">{customer.address}</p>
-                      {customer.city && (
-                        <p className="text-sm text-muted-foreground">{customer.city}</p>
-                      )}
+                      <p style={{ fontSize: 11, color: MUTED, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.06em" }}>{t("address")}</p>
+                      <p style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{customer.address}</p>
+                      {customer.city && <p style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>{customer.city}</p>}
                     </div>
                   </div>
                 )}
               </div>
-            </div>
+            </SectionCard>
 
-            {/* Corporate Info */}
+            {/* Corporate */}
             {customer.customer_type === "corporate" && customer.company_name && (
-              <div className="p-6 rounded-lg border border-border bg-card">
-                <h3 className="font-semibold mb-4 flex items-center gap-2">
-                  <Building2 className="w-5 h-5" />
-                  {t("companyInfo")}
-                </h3>
-                <div className="space-y-2">
-                  <div>
-                    <p className="text-sm text-muted-foreground">{t("companyName")}</p>
-                    <p className="font-medium">{customer.company_name}</p>
-                  </div>
-                </div>
-              </div>
+              <SectionCard title={t("companyInfo")} icon={<Building2 size={15} />}>
+                <InfoRow label={t("companyName")} value={customer.company_name} />
+              </SectionCard>
             )}
 
-            {/* License Information */}
+            {/* License */}
             {customer.drivers_license_number && (
-              <div className="p-6 rounded-lg border border-border bg-card">
-                <h3 className="font-semibold mb-4 flex items-center gap-2">
-                  <CreditCard className="w-5 h-5" />
-                  {t("documents")}
-                </h3>
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">{t("licenseNumber")}</p>
-                    <p className="font-medium">{customer.drivers_license_number}</p>
-                  </div>
+              <SectionCard title={t("documents")} icon={<CreditCard size={15} />}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  <InfoRow label={t("licenseNumber")} value={customer.drivers_license_number} />
                   {customer.license_expiry_date && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">{t("licenseExpiry")}</p>
-                      <p className="font-medium">
-                        {new Date(customer.license_expiry_date).toLocaleDateString()}
-                      </p>
-                    </div>
+                    <InfoRow label={t("licenseExpiry")} value={new Date(customer.license_expiry_date).toLocaleDateString()} />
                   )}
                 </div>
-              </div>
+              </SectionCard>
             )}
 
             {/* Emergency Contact */}
             {customer.emergency_contact_name && (
-              <div className="p-6 rounded-lg border border-border bg-card">
-                <h3 className="font-semibold mb-4">{t("emergencyContact")}</h3>
-                <div className="space-y-2">
-                  <div>
-                    <p className="text-sm text-muted-foreground">{t("emergencyContactName")}</p>
-                    <p className="font-medium">{customer.emergency_contact_name}</p>
-                  </div>
+              <SectionCard title={t("emergencyContact")}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  <InfoRow label={t("emergencyContactName")} value={customer.emergency_contact_name} />
                   {customer.emergency_contact_phone && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">{t("emergencyContactPhone")}</p>
-                      <p className="font-medium">{customer.emergency_contact_phone}</p>
-                    </div>
+                    <InfoRow label={t("emergencyContactPhone")} value={customer.emergency_contact_phone} />
                   )}
                 </div>
-              </div>
+              </SectionCard>
             )}
 
             {/* Notes */}
             {customer.notes && (
-              <div className="p-6 rounded-lg border border-border bg-card">
-                <h3 className="font-semibold mb-4 flex items-center gap-2">
-                  <FileText className="w-5 h-5" />
-                  Notes
-                </h3>
-                <p className="text-sm whitespace-pre-wrap">{customer.notes}</p>
-              </div>
+              <SectionCard title="Notes" icon={<FileText size={15} />}>
+                <p style={{ fontSize: 13, color: MUTED, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{customer.notes}</p>
+              </SectionCard>
             )}
           </div>
 
-          {/* Stats Sidebar */}
-          <div className="space-y-6">
-            {/* Quick Stats */}
-            <div className="p-6 rounded-lg border border-border bg-card">
-              <h3 className="font-semibold mb-4">Customer Statistics</h3>
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">{t("totalRentals")}</p>
-                  <p className="text-2xl font-bold">{customer.total_rentals}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">{t("lifetimeValue")}</p>
-                  <p className="text-2xl font-bold">
-                    {parseFloat(customer.lifetime_value).toLocaleString()} DZD
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">{t("customerSince")}</p>
-                  <p className="font-medium">
-                    {new Date(customer.created_at).toLocaleDateString()}
-                  </p>
-                </div>
+          {/* ── Right sidebar ── */}
+          <div style={{ position: "sticky", top: 24 }}>
+            <div style={{ padding: "22px", borderRadius: 14, background: SURFACE, border: `1px solid ${BORDER}` }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, letterSpacing: "-0.015em", marginBottom: 16 }}>Customer Statistics</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <StatCard label={t("totalRentals")} value={customer.total_rentals} />
+                <StatCard label={t("lifetimeValue")} value={`${parseFloat(customer.lifetime_value).toLocaleString()} DZD`} accent={GREEN} />
+                <StatCard label={t("customerSince")} value={new Date(customer.created_at).toLocaleDateString()} />
               </div>
             </div>
           </div>
         </div>
-      ) : (
-        // History Tab
-        <div className="space-y-6">
+      )}
+
+      {/* ════════ HISTORY TAB ════════ */}
+      {activeTab === "history" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="p-4 rounded-lg border border-border bg-card">
-              <p className="text-sm text-muted-foreground mb-1">Total Contracts</p>
-              <p className="text-2xl font-bold">{history?.stats.total_contracts || 0}</p>
-            </div>
-            <div className="p-4 rounded-lg border border-border bg-card">
-              <p className="text-sm text-muted-foreground mb-1">{t("active")}</p>
-              <p className="text-2xl font-bold text-green-500">
-                {history?.stats.active_contracts || 0}
-              </p>
-            </div>
-            <div className="p-4 rounded-lg border border-border bg-card">
-              <p className="text-sm text-muted-foreground mb-1">{t("completed")}</p>
-              <p className="text-2xl font-bold">{history?.stats.completed_contracts || 0}</p>
-            </div>
-            <div className="p-4 rounded-lg border border-border bg-card">
-              <p className="text-sm text-muted-foreground mb-1">{t("totalSpent")}</p>
-              <p className="text-2xl font-bold">
-                {(history?.stats.total_spent || 0).toLocaleString()} DZD
-              </p>
-            </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
+            {[
+              { label: "Total Contracts", value: history?.stats.total_contracts || 0 },
+              { label: "Active", value: history?.stats.active_contracts || 0, accent: GREEN },
+              { label: "Completed", value: history?.stats.completed_contracts || 0 },
+              { label: t("totalSpent"), value: `${(history?.stats.total_spent || 0).toLocaleString()} DZD` },
+            ].map((s, i) => (
+              <StatCard key={i} label={s.label} value={s.value} accent={s.accent} />
+            ))}
           </div>
 
-          {/* Contracts Table */}
+          {/* Table */}
           {history && history.contracts.length > 0 ? (
-            <DataTable
-              columns={[
-                {
-                  key: "contract_number",
-                  label: "Contract #",
-                  sortable: true,
-                },
-                {
-                  key: "vehicle",
-                  label: "Vehicle",
-                  render: (vehicle) =>
-                    `${vehicle.brand} ${vehicle.model} (${vehicle.registration_number})`,
-                },
-                {
-                  key: "start_date",
-                  label: "Period",
-                  render: (value, row) =>
-                    `${new Date(value).toLocaleDateString()} - ${new Date(
-                      row.end_date
-                    ).toLocaleDateString()}`,
-                },
-                {
-                  key: "total_amount",
-                  label: "Amount",
-                  render: (value) => `${parseFloat(value).toLocaleString()} DZD`,
-                  sortable: true,
-                },
-                {
-                  key: "status",
-                  label: t("status"),
-                  render: (status) => <StatusBadge status={status} />,
-                },
-              ]}
-              data={history.contracts}
-            />
+            <div style={{ borderRadius: 14, border: `1px solid ${BORDER}`, background: SURFACE, overflow: "hidden" }}>
+              <DataTable
+                columns={[
+                  {
+                    key: "contract_number", label: "Contract #", sortable: true,
+                    render: (value) => <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 13, color: GREEN }}>{value}</span>,
+                  },
+                  {
+                    key: "vehicle", label: "Vehicle",
+                    render: (vehicle) => <span style={{ fontSize: 13 }}>{vehicle.brand} {vehicle.model} ({vehicle.registration_number})</span>,
+                  },
+                  {
+                    key: "start_date", label: "Period",
+                    render: (value, row) => (
+                      <span style={{ fontSize: 12 }}>
+                        {new Date(value).toLocaleDateString()} → {new Date(row.end_date).toLocaleDateString()}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: "total_amount", label: "Amount", sortable: true,
+                    render: (value) => <span style={{ fontWeight: 700, fontSize: 13 }}>{parseFloat(value).toLocaleString()} DZD</span>,
+                  },
+                  {
+                    key: "status", label: t("status"),
+                    render: (status) => <StatusBadge status={status} />,
+                  },
+                ]}
+                data={history.contracts}
+              />
+            </div>
           ) : (
-            <div className="text-center py-12">
-              <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">{t("noRentalHistory")}</p>
+            <div style={{ textAlign: "center", padding: "56px 0" }}>
+              <FileText size={44} style={{ color: "rgba(255,255,255,0.1)", display: "block", margin: "0 auto 14px" }} />
+              <p style={{ fontSize: 14, fontWeight: 600, color: MUTED, marginBottom: 6 }}>{t("noRentalHistory")}</p>
             </div>
           )}
         </div>

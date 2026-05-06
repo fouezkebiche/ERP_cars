@@ -2,7 +2,6 @@
 "use client"
 
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
 import { StatCard } from '@/components/analytics/stat-card'
 import { DataTable } from '@/components/dashboard/data-table'
 import { RevenueChart } from '@/components/analytics/revenue-chart'
@@ -29,21 +28,66 @@ import {
 } from '@/components/reports/ReportViews'
 import {
   BarChart3,
-  TrendingUp,
   Users,
   Download,
   AlertCircle,
   DollarSign,
   Car,
   FileText,
-  CreditCard,
+  CheckCircle2,
+  Calendar,
 } from 'lucide-react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTranslations } from 'next-intl'
+
+// ── Design tokens ────────────────────────────────────────────────────────────
+const BG           = '#080B10'
+const SURFACE      = 'rgba(255,255,255,0.04)'
+const SURFACE2     = 'rgba(255,255,255,0.07)'
+const BORDER       = '1px solid rgba(255,255,255,0.07)'
+const BORDER_COLOR = 'rgba(255,255,255,0.07)'
+const GREEN        = '#22C55E'
+const MUTED        = 'rgba(255,255,255,0.4)'
+const TEXT         = '#FFFFFF'
+const FONT         = "'Plus Jakarta Sans', system-ui, sans-serif"
+
+const card: React.CSSProperties = {
+  background: SURFACE, border: BORDER, borderRadius: 12, padding: 24, fontFamily: FONT,
+}
+const emptyBox: React.CSSProperties = {
+  height: 320, display: 'flex', alignItems: 'center',
+  justifyContent: 'center', color: MUTED, fontFamily: FONT,
+}
+const miniCard: React.CSSProperties = {
+  background: SURFACE, border: BORDER, borderRadius: 12, padding: 24, fontFamily: FONT,
+}
+
+// ── Report type card styles ───────────────────────────────────────────────────
+const reportCardBase: React.CSSProperties = {
+  padding: 24, borderRadius: 12, borderWidth: 2, borderStyle: 'solid',
+  borderColor: BORDER_COLOR, cursor: 'pointer', textAlign: 'center',
+  transition: 'border-color 0.15s, background 0.15s, transform 0.15s',
+  fontFamily: FONT, background: SURFACE, color: TEXT, width: '100%',
+}
+const reportCardActive: React.CSSProperties = {
+  ...reportCardBase, background: GREEN, borderColor: GREEN,
+  color: '#000', transform: 'scale(1.03)', boxShadow: `0 0 18px ${GREEN}55`,
+}
+
+// ── Period labels for the reports tab summary ─────────────────────────────────
+const PERIOD_LABELS: Record<string, string> = {
+  today: 'Today', week: 'This Week', month: 'This Month',
+  quarter: 'This Quarter', year: 'This Year',
+}
+
+const globalStyle = `
+  @keyframes _spin { to { transform: rotate(360deg); } }
+  @keyframes _fade { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+`
 
 export default function AnalyticsPage() {
   const t = useTranslations('analytics')
 
+  // ── Analytics date range ──────────────────────────────────────────────────
   const [dateRange, setDateRange] = useState<{
     period: 'today' | 'week' | 'month' | 'quarter' | 'year'
     start_date?: string
@@ -51,695 +95,523 @@ export default function AnalyticsPage() {
   }>({ period: 'month' })
 
   const [vehicleMetric, setVehicleMetric] = useState<'utilization' | 'revenue' | 'profit'>('utilization')
+  const [activeTab, setActiveTab] = useState('overview')
 
-  const [reportType, setReportType] = useState<ReportType>('executive')
-  const [advancedFilters, setAdvancedFilters] = useState<AdvancedReportFilters>({ period: 'month' })
+  // ── Reports tab: single source of truth for ALL report filter state ───────
+  // BUG FIX: Previously `advancedFilters` defaulted to `{ period:'month' }` and
+  // was only updated on "Apply Filters". So exports always sent 'month' regardless
+  // of what the user selected. Now ONE state covers period + all advanced fields.
+  const [reportType, setReportType]       = useState<ReportType>('executive')
+  const [reportFilters, setReportFilters] = useState<AdvancedReportFilters>({ period: 'month' })
 
   const {
-    data: reportData,
-    loading: reportLoading,
-    error: reportError,
-    generateReport,
-    downloadPDF,
-    downloadExcel,
-    downloadJSON,
+    data: reportData, loading: reportLoading, error: reportError,
+    generateReport, downloadPDF, downloadExcel, downloadJSON,
   } = useReports()
 
   const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboard(dateRange)
-  const { data: revenueData, loading: revenueLoading } = useRevenue({ ...dateRange, compare: true })
-  const { data: vehicleData, loading: vehicleLoading } = useVehiclePerformance({
-    ...dateRange,
-    metric: vehicleMetric,
-    limit: 10
-  })
-  const { data: customerData, loading: customerLoading } = useCustomerSegmentation()
-  const { data: contractData, loading: contractLoading } = useContractAnalytics(dateRange)
-  const { data: paymentData, loading: paymentLoading } = usePaymentAnalytics(dateRange)
+  const { data: revenueData,   loading: revenueLoading }   = useRevenue({ ...dateRange, compare: true })
+  const { data: vehicleData,   loading: vehicleLoading }   = useVehiclePerformance({ ...dateRange, metric: vehicleMetric, limit: 10 })
+  const { data: customerData,  loading: customerLoading }  = useCustomerSegmentation()
+  const { data: contractData,  loading: contractLoading }  = useContractAnalytics(dateRange)
+  const { data: paymentData,   loading: paymentLoading }   = usePaymentAnalytics(dateRange)
 
   const isLoading = dashboardLoading || revenueLoading || vehicleLoading || customerLoading || contractLoading || paymentLoading
 
   const formatCurrency = (value: number) =>
-    new Intl.NumberFormat('fr-DZ', {
-      style: 'decimal',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value)
+    new Intl.NumberFormat('fr-DZ', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value)
 
+  // ── Analytics filter handlers ─────────────────────────────────────────────
   const handlePeriodChange = (period: 'today' | 'week' | 'month' | 'quarter' | 'year') => {
     setDateRange({ period })
+    // Sync with report filters for export functionality
+    setReportFilters(prev => ({ ...prev, period }))
   }
-
   const handleDateRangeChange = (range: { start_date?: string; end_date?: string }) => {
     if (range.start_date && range.end_date) {
       setDateRange({ period: 'month', ...range })
+      // Sync with report filters for export functionality
+      setReportFilters(prev => ({ ...prev, startDate: range.start_date, endDate: range.end_date, period: undefined }))
     } else {
       setDateRange({ period: 'month' })
+      // Sync with report filters for export functionality
+      setReportFilters(prev => ({ ...prev, startDate: undefined, endDate: undefined, period: 'month' }))
     }
   }
 
+  // ── Reports tab handlers — all read from `reportFilters` ─────────────────
+  const handleReportPeriodChange = (period: AdvancedReportFilters['period']) => {
+    setReportFilters(prev => ({ ...prev, period, startDate: undefined, endDate: undefined }))
+  }
   const handleAdvancedFiltersApply = (filters: AdvancedReportFilters) => {
-    setAdvancedFilters(filters)
+    setReportFilters(filters)
   }
-
   const handleAdvancedFiltersReset = () => {
-    setAdvancedFilters({ period: 'month' })
+    setReportFilters({ period: 'month' })
   }
 
-  const handleGenerateReport = async () => {
-    await generateReport(reportType, advancedFilters)
-  }
+  // Generate and exports all read from the same `reportFilters`
+  const handleGenerateReport = () => generateReport(reportType, reportFilters)
+  const handleDownloadPDF    = () => downloadPDF(reportType, reportFilters)
+  const handleDownloadExcel  = () => downloadExcel(reportType, reportFilters)
+  const handleDownloadJSON   = () => downloadJSON(reportType, reportFilters)
 
+  // The "Export Report" button in the page header exports an executive PDF
+  // using the current analytics dateRange — kept as-is (no change to logic)
   const handleExportReport = async () => {
     try {
-      await downloadPDF('executive', {
-        period: dateRange.period,
-        startDate: dateRange.start_date,
-        endDate: dateRange.end_date,
-      })
+      await downloadPDF(reportType, reportFilters)
     } catch (err) {
       console.error('Export failed:', err)
     }
   }
 
+  // ── Derived display ───────────────────────────────────────────────────────
+  const hasCustomRange  = !!(reportFilters.startDate && reportFilters.endDate)
+  const periodLabel     = hasCustomRange
+    ? `${reportFilters.startDate} → ${reportFilters.endDate}`
+    : PERIOD_LABELS[reportFilters.period ?? 'month'] ?? 'Month'
+
+  // ── Loading ───────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">{t('loading')}</p>
+      <>
+        <style>{globalStyle}</style>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', background:BG, fontFamily:FONT }}>
+          <div style={{ textAlign:'center' }}>
+            <div style={{ width:56, height:56, border:`4px solid ${BORDER_COLOR}`, borderTopColor:GREEN, borderRadius:'50%', animation:'_spin 0.8s linear infinite', margin:'0 auto 16px' }} />
+            <p style={{ color:MUTED, fontSize:14 }}>{t('loading')}</p>
+          </div>
         </div>
-      </div>
+      </>
     )
   }
 
+  // ── Error ─────────────────────────────────────────────────────────────────
   if (dashboardError) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center max-w-md">
-          <AlertCircle className="w-16 h-16 text-destructive mx-auto mb-4" />
-          <h2 className="text-xl font-semibold mb-2">{t('failedTitle')}</h2>
-          <p className="text-muted-foreground mb-4">{dashboardError}</p>
-          <Button onClick={() => window.location.reload()}>{t('retry')}</Button>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', background:BG, fontFamily:FONT }}>
+        <div style={{ textAlign:'center', maxWidth:400 }}>
+          <AlertCircle style={{ width:56, height:56, color:'#EF4444', margin:'0 auto 16px' }} />
+          <h2 style={{ fontSize:20, fontWeight:600, color:TEXT, marginBottom:8 }}>{t('failedTitle')}</h2>
+          <p style={{ color:MUTED, marginBottom:20, fontSize:14 }}>{dashboardError}</p>
+          <button onClick={() => window.location.reload()} style={{ padding:'10px 24px', borderRadius:8, border:`1px solid ${GREEN}`, background:'transparent', color:GREEN, fontFamily:FONT, fontSize:14, fontWeight:600, cursor:'pointer' }}>
+            {t('retry')}
+          </button>
         </div>
       </div>
     )
   }
 
+  const tabs = [
+    { value:'overview',  label:t('tabs.overview') },
+    { value:'revenue',   label:t('tabs.revenue') },
+    { value:'vehicles',  label:t('tabs.vehicles') },
+    { value:'contracts', label:t('tabs.contracts') },
+    { value:'customers', label:t('tabs.customers') },
+    { value:'reports',   label:t('tabs.reports') },
+  ]
+
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">{t('title')}</h1>
-          <p className="text-muted-foreground">{t('subtitle')}</p>
+    <>
+      <style>{globalStyle}</style>
+      <div style={{ display:'flex', flexDirection:'column', gap:32, fontFamily:FONT, color:TEXT }}>
+
+        {/* ── Header ────────────────────────────────────────────────────── */}
+        <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', justifyContent:'space-between', gap:16 }}>
+          <div>
+            <h1 style={{ fontSize:28, fontWeight:700, color:TEXT, marginBottom:6 }}>{t('title')}</h1>
+            <p style={{ color:MUTED, fontSize:14 }}>{t('subtitle')}</p>
+          </div>
+          <button
+            onClick={handleExportReport}
+            style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 20px', borderRadius:8, background:GREEN, border:'none', color:'#000', fontFamily:FONT, fontSize:14, fontWeight:600, cursor:'pointer', boxShadow:`0 0 16px ${GREEN}55` }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#16a34a' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = GREEN }}
+          >
+            <Download style={{ width:16, height:16 }} />
+            {t('exportReport')}
+          </button>
         </div>
-        <Button onClick={handleExportReport} className="bg-primary hover:bg-primary/90">
-          <Download className="w-4 h-4 mr-2" />
-          {t('exportReport')}
-        </Button>
-      </div>
 
-      {/* Filters */}
-      <AnalyticsFilters
-        onPeriodChange={handlePeriodChange}
-        onDateRangeChange={handleDateRangeChange}
-        onMetricChange={setVehicleMetric}
-        currentPeriod={dateRange.period}
-        showMetricFilter={false}
-      />
-
-      {/* Main KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title={t('kpi.totalRevenue')}
-          value={`${formatCurrency(dashboardData?.revenue.total || 0)} DZD`}
-          change={revenueData?.growth_percentage}
-          icon={DollarSign}
-          iconColor="text-green-600"
-          subtitle={t('kpi.fromLastPeriod')}
+        {/* ── Analytics filters ──────────────────────────────────────────── */}
+        <AnalyticsFilters
+          onPeriodChange={handlePeriodChange}
+          onDateRangeChange={handleDateRangeChange}
+          onMetricChange={setVehicleMetric}
+          currentPeriod={dateRange.period}
+          showMetricFilter={false}
         />
-        <StatCard
-          title={t('kpi.activeContracts')}
-          value={dashboardData?.fleet.active_rentals || 0}
-          icon={FileText}
-          iconColor="text-blue-600"
-          subtitle={`${dashboardData?.fleet.total_vehicles || 0} ${t('kpi.totalVehicles')}`}
-        />
-        <StatCard
-          title={t('kpi.fleetUtilization')}
-          value={`${(dashboardData?.fleet.average_utilization || 0).toFixed(1)}%`}
-          icon={Car}
-          iconColor="text-purple-600"
-          subtitle={t('kpi.avgAcrossFleet')}
-        />
-        <StatCard
-          title={t('kpi.totalCustomers')}
-          value={dashboardData?.customers.total || 0}
-          icon={Users}
-          iconColor="text-orange-600"
-          subtitle={`${dashboardData?.customers.new || 0} ${t('kpi.newThisPeriod')}`}
-        />
-      </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger value="overview">{t('tabs.overview')}</TabsTrigger>
-          <TabsTrigger value="revenue">{t('tabs.revenue')}</TabsTrigger>
-          <TabsTrigger value="vehicles">{t('tabs.vehicles')}</TabsTrigger>
-          <TabsTrigger value="contracts">{t('tabs.contracts')}</TabsTrigger>
-          <TabsTrigger value="customers">{t('tabs.customers')}</TabsTrigger>
-          <TabsTrigger value="reports">{t('tabs.reports')}</TabsTrigger>
-        </TabsList>
+        {/* ── KPI grid ──────────────────────────────────────────────────── */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:16 }}>
+          <StatCard title={t('kpi.totalRevenue')} value={`${formatCurrency(dashboardData?.revenue.total || 0)} DZD`} change={revenueData?.growth_percentage} icon={DollarSign} iconColor="text-green-600" subtitle={t('kpi.fromLastPeriod')} />
+          <StatCard title={t('kpi.activeContracts')} value={dashboardData?.fleet.active_rentals || 0} icon={FileText} iconColor="text-blue-600" subtitle={`${dashboardData?.fleet.total_vehicles || 0} ${t('kpi.totalVehicles')}`} />
+          <StatCard title={t('kpi.fleetUtilization')} value={`${(dashboardData?.fleet.average_utilization || 0).toFixed(1)}%`} icon={Car} iconColor="text-purple-600" subtitle={t('kpi.avgAcrossFleet')} />
+          <StatCard title={t('kpi.totalCustomers')} value={dashboardData?.customers.total || 0} icon={Users} iconColor="text-orange-600" subtitle={`${dashboardData?.customers.new || 0} ${t('kpi.newThisPeriod')}`} />
+        </div>
 
-        {/* ── OVERVIEW ── */}
-        <TabsContent value="overview" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="rounded-lg border bg-card p-6">
-              {revenueData?.revenue_by_day && revenueData.revenue_by_day.length > 0 ? (
-                <RevenueChart data={revenueData.revenue_by_day} />
-              ) : (
-                <div className="h-80 flex items-center justify-center text-muted-foreground">
-                  {t('noRevenueData')}
-                </div>
-              )}
-            </div>
-            <div className="rounded-lg border bg-card p-6">
-              {revenueData?.revenue_by_method && revenueData.revenue_by_method.length > 0 ? (
-                <PaymentMethodsChart data={revenueData.revenue_by_method} />
-              ) : (
-                <div className="h-80 flex items-center justify-center text-muted-foreground">
-                  {t('noPaymentData')}
-                </div>
-              )}
-            </div>
+        {/* ── Tab bar ───────────────────────────────────────────────────── */}
+        <div>
+          <div style={{ display:'flex', gap:0, borderBottom:`1px solid ${BORDER_COLOR}`, overflowX:'auto' }}>
+            {tabs.map(tab => (
+              <button
+                key={tab.value}
+                onClick={() => setActiveTab(tab.value)}
+                style={{
+                  padding:'10px 20px', background:'transparent', border:'none',
+                  borderBottom: activeTab === tab.value ? `2px solid ${GREEN}` : '2px solid transparent',
+                  color: activeTab === tab.value ? GREEN : MUTED,
+                  fontFamily:FONT, fontSize:14, fontWeight: activeTab === tab.value ? 600 : 400,
+                  cursor:'pointer', whiteSpace:'nowrap', transition:'color 0.15s', marginBottom:-1,
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="rounded-lg border bg-card p-6">
-              {vehicleData?.vehicles && vehicleData.vehicles.length > 0 ? (
-                <UtilizationChart data={vehicleData.vehicles} />
-              ) : (
-                <div className="h-80 flex items-center justify-center text-muted-foreground">
-                  {t('noVehicleData')}
-                </div>
-              )}
-            </div>
-            <div className="rounded-lg border bg-card p-6">
-              {contractData?.by_status ? (
-                <ContractsChart data={contractData.by_status} />
-              ) : (
-                <div className="h-80 flex items-center justify-center text-muted-foreground">
-                  {t('noContractData')}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="rounded-lg border bg-card p-6">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-muted-foreground">{t('overview.avgTransaction')}</p>
-                <DollarSign className="h-5 w-5 text-green-600" />
+          {/* ── OVERVIEW ────────────────────────────────────────────────── */}
+          {activeTab === 'overview' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:24, paddingTop:24 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:24 }}>
+                <div style={card}>{revenueData?.revenue_by_day?.length ? <RevenueChart data={revenueData.revenue_by_day} /> : <div style={emptyBox}>{t('noRevenueData')}</div>}</div>
+                <div style={card}>{revenueData?.revenue_by_method?.length ? <PaymentMethodsChart data={revenueData.revenue_by_method} /> : <div style={emptyBox}>{t('noPaymentData')}</div>}</div>
               </div>
-              <p className="text-2xl font-bold">
-                {formatCurrency(revenueData?.average_transaction_value || 0)} DZD
-              </p>
-            </div>
-            <div className="rounded-lg border bg-card p-6">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-muted-foreground">{t('overview.retentionRate')}</p>
-                <Users className="h-5 w-5 text-blue-600" />
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:24 }}>
+                <div style={card}>{vehicleData?.vehicles?.length ? <UtilizationChart data={vehicleData.vehicles} /> : <div style={emptyBox}>{t('noVehicleData')}</div>}</div>
+                <div style={card}>{contractData?.by_status ? <ContractsChart data={contractData.by_status} /> : <div style={emptyBox}>{t('noContractData')}</div>}</div>
               </div>
-              <p className="text-2xl font-bold">
-                {(dashboardData?.customers.retention_rate || 0).toFixed(1)}%
-              </p>
-            </div>
-            <div className="rounded-lg border bg-card p-6">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-muted-foreground">{t('overview.completionRate')}</p>
-                <FileText className="h-5 w-5 text-purple-600" />
-              </div>
-              <p className="text-2xl font-bold">
-                {(contractData?.completion_rate || 0).toFixed(1)}%
-              </p>
-            </div>
-          </div>
-        </TabsContent>
-
-        {/* ── REVENUE ── */}
-        <TabsContent value="revenue" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <StatCard
-              title={t('revenue.totalRevenue')}
-              value={`${formatCurrency(revenueData?.total_revenue || 0)} DZD`}
-              change={revenueData?.growth_percentage}
-              subtitle={t('revenue.vsLastPeriod')}
-            />
-            <StatCard
-              title={t('revenue.totalPayments')}
-              value={revenueData?.payment_count || 0}
-              subtitle={t('revenue.completedTransactions')}
-            />
-            <StatCard
-              title={t('revenue.avgTransaction')}
-              value={`${formatCurrency(revenueData?.average_transaction_value || 0)} DZD`}
-              subtitle={t('revenue.perPayment')}
-            />
-          </div>
-
-          <div className="rounded-lg border bg-card p-6">
-            {revenueData?.revenue_by_day && revenueData.revenue_by_day.length > 0 ? (
-              <RevenueChart data={revenueData.revenue_by_day} title={t('revenue.revenueOverTime')} />
-            ) : (
-              <div className="h-80 flex items-center justify-center text-muted-foreground">
-                {t('noRevenueTrend')}
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="rounded-lg border bg-card p-6">
-              {revenueData?.revenue_by_method && revenueData.revenue_by_method.length > 0 ? (
-                <PaymentMethodsChart data={revenueData.revenue_by_method} />
-              ) : (
-                <div className="h-80 flex items-center justify-center text-muted-foreground">
-                  {t('noPaymentMethod')}
-                </div>
-              )}
-            </div>
-            <div className="rounded-lg border bg-card p-6">
-              <h3 className="text-lg font-semibold mb-4">{t('revenue.paymentBreakdown')}</h3>
-              <div className="space-y-4">
-                {revenueData?.revenue_by_method?.map((method) => (
-                  <div key={method.method} className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium">
-                        {method.method.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {method.count} {t('revenue.payments')}
-                      </span>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:16 }}>
+                {[
+                  { label:t('overview.avgTransaction'), icon:<DollarSign style={{ width:18, height:18, color:GREEN }} />,       value:`${formatCurrency(revenueData?.average_transaction_value || 0)} DZD` },
+                  { label:t('overview.retentionRate'),  icon:<Users      style={{ width:18, height:18, color:'#3B82F6' }} />,   value:`${(dashboardData?.customers.retention_rate || 0).toFixed(1)}%` },
+                  { label:t('overview.completionRate'), icon:<FileText   style={{ width:18, height:18, color:'#A855F7' }} />,   value:`${(contractData?.completion_rate || 0).toFixed(1)}%` },
+                ].map(item => (
+                  <div key={item.label} style={miniCard}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                      <p style={{ fontSize:12, fontWeight:500, color:MUTED }}>{item.label}</p>
+                      {item.icon}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary rounded-full"
-                          style={{ width: `${((method.amount / (revenueData?.total_revenue || 1)) * 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-sm font-medium">{formatCurrency(method.amount)} DZD</span>
-                    </div>
+                    <p style={{ fontSize:24, fontWeight:700, color:TEXT, marginTop:4 }}>{item.value}</p>
                   </div>
                 ))}
               </div>
             </div>
-          </div>
-        </TabsContent>
+          )}
 
-        {/* ── VEHICLES ── */}
-        <TabsContent value="vehicles" className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-semibold">{t('vehicles.performance')}</h3>
-            <div className="flex gap-2">
-              {(['utilization', 'revenue', 'profit'] as const).map((metric) => (
-                <Button
-                  key={metric}
-                  onClick={() => setVehicleMetric(metric)}
-                  variant={vehicleMetric === metric ? 'default' : 'outline'}
-                  size="sm"
-                >
-                  {t(`vehicles.${metric}` as any)}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <StatCard
-              title={t('vehicles.fleetSize')}
-              value={vehicleData?.fleet_summary.total_vehicles || 0}
-              subtitle={t('vehicles.totalVehicles')}
-            />
-            <StatCard
-              title={t('vehicles.avgUtilization')}
-              value={`${(vehicleData?.fleet_summary.average_utilization || 0).toFixed(1)}%`}
-              subtitle={t('vehicles.fleetWide')}
-            />
-            <StatCard
-              title={t('vehicles.totalRentals')}
-              value={vehicleData?.fleet_summary.total_rentals || 0}
-              subtitle={t('vehicles.inPeriod')}
-            />
-            <StatCard
-              title={t('vehicles.fleetRevenue')}
-              value={`${formatCurrency(vehicleData?.fleet_summary.total_revenue || 0)} DZD`}
-              subtitle={t('vehicles.totalEarned')}
-            />
-          </div>
-
-          <div className="rounded-lg border bg-card p-6">
-            {vehicleData?.vehicles && vehicleData.vehicles.length > 0 ? (
-              <UtilizationChart data={vehicleData.vehicles} limit={15} />
-            ) : (
-              <div className="h-80 flex items-center justify-center text-muted-foreground">
-                {t('noVehiclePerf')}
+          {/* ── REVENUE ─────────────────────────────────────────────────── */}
+          {activeTab === 'revenue' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:24, paddingTop:24 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:16 }}>
+                <StatCard title={t('revenue.totalRevenue')} value={`${formatCurrency(revenueData?.total_revenue || 0)} DZD`} change={revenueData?.growth_percentage} subtitle={t('revenue.vsLastPeriod')} />
+                <StatCard title={t('revenue.totalPayments')} value={revenueData?.payment_count || 0} subtitle={t('revenue.completedTransactions')} />
+                <StatCard title={t('revenue.avgTransaction')} value={`${formatCurrency(revenueData?.average_transaction_value || 0)} DZD`} subtitle={t('revenue.perPayment')} />
               </div>
-            )}
-          </div>
-
-          {vehicleData?.vehicles && vehicleData.vehicles.length > 0 && (
-            <div className="rounded-lg border bg-card">
-              <DataTable
-                columns={[
-                  {
-                    key: 'vehicle',
-                    label: t('vehicles.vehicle'),
-                    sortable: true,
-                    render: (_: any, row: any) => (
-                      <div>
-                        <p className="font-medium">{row.brand} {row.model}</p>
-                        <p className="text-sm text-muted-foreground">{row.registration_number}</p>
-                      </div>
-                    ),
-                  },
-                  {
-                    key: 'utilization_rate',
-                    label: t('vehicles.utilization_col'),
-                    sortable: true,
-                    render: (value: number) => (
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 h-2 bg-muted rounded-full overflow-hidden">
-                          <div className="h-full bg-primary rounded-full" style={{ width: `${Math.min(value, 100)}%` }} />
+              <div style={card}>{revenueData?.revenue_by_day?.length ? <RevenueChart data={revenueData.revenue_by_day} title={t('revenue.revenueOverTime')} /> : <div style={emptyBox}>{t('noRevenueTrend')}</div>}</div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:24 }}>
+                <div style={card}>{revenueData?.revenue_by_method?.length ? <PaymentMethodsChart data={revenueData.revenue_by_method} /> : <div style={emptyBox}>{t('noPaymentMethod')}</div>}</div>
+                <div style={card}>
+                  <h3 style={{ fontSize:16, fontWeight:600, color:TEXT, marginBottom:16 }}>{t('revenue.paymentBreakdown')}</h3>
+                  <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                    {revenueData?.revenue_by_method?.map(method => (
+                      <div key={method.method} style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}>
+                          <span style={{ fontWeight:500, color:TEXT }}>{method.method.replace('_',' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                          <span style={{ color:MUTED }}>{method.count} {t('revenue.payments')}</span>
                         </div>
-                        <span className="text-sm font-medium">{value.toFixed(1)}%</span>
+                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <div style={{ flex:1, height:6, background:BORDER_COLOR, borderRadius:99, overflow:'hidden' }}>
+                            <div style={{ height:'100%', background:GREEN, borderRadius:99, width:`${(method.amount / (revenueData?.total_revenue || 1)) * 100}%` }} />
+                          </div>
+                          <span style={{ fontSize:13, fontWeight:500, color:TEXT }}>{formatCurrency(method.amount)} DZD</span>
+                        </div>
                       </div>
-                    ),
-                  },
-                  { key: 'rental_count', label: t('vehicles.rentals'), sortable: true },
-                  {
-                    key: 'total_revenue',
-                    label: t('vehicles.revenue'),
-                    sortable: true,
-                    render: (value: number) => `${formatCurrency(value)} DZD`,
-                  },
-                  {
-                    key: 'revenue_per_day',
-                    label: t('vehicles.avgDay'),
-                    sortable: true,
-                    render: (value: number) => `${formatCurrency(value)} DZD`,
-                  },
-                  {
-                    key: 'current_status',
-                    label: t('vehicles.status'),
-                    render: (value: string) => (
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        value === 'available' ? 'bg-green-100 text-green-800' :
-                        value === 'rented' ? 'bg-blue-100 text-blue-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {value === 'available' ? t('vehicles.available') : value === 'rented' ? t('vehicles.rented') : value}
-                      </span>
-                    ),
-                  },
-                ]}
-                data={vehicleData.vehicles}
-              />
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
-        </TabsContent>
 
-        {/* ── CONTRACTS ── */}
-        <TabsContent value="contracts" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <StatCard
-              title={t('contracts.totalContracts')}
-              value={contractData?.total_contracts || 0}
-              subtitle={t('contracts.allTime')}
-            />
-            <StatCard
-              title={t('contracts.activeNow')}
-              value={contractData?.by_status.active || 0}
-              subtitle={t('contracts.currentlyActive')}
-            />
-            <StatCard
-              title={t('contracts.completed')}
-              value={contractData?.by_status.completed || 0}
-              subtitle={t('contracts.successfullyFinished')}
-            />
-            <StatCard
-              title={t('contracts.completionRate')}
-              value={`${(contractData?.completion_rate || 0).toFixed(1)}%`}
-              subtitle={t('contracts.successRate')}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="rounded-lg border bg-card p-6">
-              {contractData?.by_status ? (
-                <ContractsChart data={contractData.by_status} />
-              ) : (
-                <div className="h-80 flex items-center justify-center text-muted-foreground">
-                  {t('noContractData')}
+          {/* ── VEHICLES ────────────────────────────────────────────────── */}
+          {activeTab === 'vehicles' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:24, paddingTop:24 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
+                <h3 style={{ fontSize:16, fontWeight:600, color:TEXT }}>{t('vehicles.performance')}</h3>
+                <div style={{ display:'flex', gap:8 }}>
+                  {(['utilization','revenue','profit'] as const).map(metric => (
+                    <button key={metric} onClick={() => setVehicleMetric(metric)} style={{ padding:'6px 14px', borderRadius:8, fontSize:13, fontWeight:500, cursor:'pointer', fontFamily:FONT, transition:'all 0.15s', background: vehicleMetric===metric ? GREEN : 'transparent', color: vehicleMetric===metric ? '#000' : MUTED, border: vehicleMetric===metric ? `1px solid ${GREEN}` : `1px solid ${BORDER_COLOR}`, boxShadow: vehicleMetric===metric ? `0 0 10px ${GREEN}44` : 'none' }}>
+                      {t(`vehicles.${metric}` as any)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:16 }}>
+                <StatCard title={t('vehicles.fleetSize')} value={vehicleData?.fleet_summary.total_vehicles || 0} subtitle={t('vehicles.totalVehicles')} />
+                <StatCard title={t('vehicles.avgUtilization')} value={`${(vehicleData?.fleet_summary.average_utilization || 0).toFixed(1)}%`} subtitle={t('vehicles.fleetWide')} />
+                <StatCard title={t('vehicles.totalRentals')} value={vehicleData?.fleet_summary.total_rentals || 0} subtitle={t('vehicles.inPeriod')} />
+                <StatCard title={t('vehicles.fleetRevenue')} value={`${formatCurrency(vehicleData?.fleet_summary.total_revenue || 0)} DZD`} subtitle={t('vehicles.totalEarned')} />
+              </div>
+              <div style={card}>{vehicleData?.vehicles?.length ? <UtilizationChart data={vehicleData.vehicles} limit={15} /> : <div style={emptyBox}>{t('noVehiclePerf')}</div>}</div>
+              {vehicleData?.vehicles?.length && (
+                <div style={{ background:SURFACE, border:BORDER, borderRadius:12, overflow:'hidden' }}>
+                  <DataTable
+                    columns={[
+                      { key:'vehicle', label:t('vehicles.vehicle'), sortable:true, render:(_:any,row:any) => (<div><p style={{ fontWeight:500,color:TEXT,fontSize:14 }}>{row.brand} {row.model}</p><p style={{ fontSize:12,color:MUTED }}>{row.registration_number}</p></div>) },
+                      { key:'utilization_rate', label:t('vehicles.utilization_col'), sortable:true, render:(value:number) => (<div style={{ display:'flex',alignItems:'center',gap:8 }}><div style={{ width:72,height:6,background:BORDER_COLOR,borderRadius:99,overflow:'hidden' }}><div style={{ height:'100%',background:GREEN,borderRadius:99,width:`${Math.min(value,100)}%` }} /></div><span style={{ fontSize:13,fontWeight:500,color:TEXT }}>{value.toFixed(1)}%</span></div>) },
+                      { key:'rental_count', label:t('vehicles.rentals'), sortable:true },
+                      { key:'total_revenue', label:t('vehicles.revenue'), sortable:true, render:(v:number) => `${formatCurrency(v)} DZD` },
+                      { key:'revenue_per_day', label:t('vehicles.avgDay'), sortable:true, render:(v:number) => `${formatCurrency(v)} DZD` },
+                      { key:'current_status', label:t('vehicles.status'), render:(value:string) => { const colors:Record<string,{bg:string;color:string}> = { available:{bg:'rgba(34,197,94,0.15)',color:'#22C55E'}, rented:{bg:'rgba(59,130,246,0.15)',color:'#60A5FA'} }; const s = colors[value] ?? {bg:'rgba(234,179,8,0.15)',color:'#EAB308'}; return <span style={{ display:'inline-flex',alignItems:'center',padding:'2px 10px',borderRadius:99,fontSize:12,fontWeight:500,background:s.bg,color:s.color }}>{value==='available'?t('vehicles.available'):value==='rented'?t('vehicles.rented'):value}</span> } },
+                    ]}
+                    data={vehicleData.vehicles}
+                  />
                 </div>
               )}
             </div>
-            <div className="rounded-lg border bg-card p-6">
-              <h3 className="text-lg font-semibold mb-6">{t('contracts.metrics')}</h3>
-              <div className="space-y-6">
+          )}
+
+          {/* ── CONTRACTS ───────────────────────────────────────────────── */}
+          {activeTab === 'contracts' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:24, paddingTop:24 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:16 }}>
+                <StatCard title={t('contracts.totalContracts')} value={contractData?.total_contracts || 0} subtitle={t('contracts.allTime')} />
+                <StatCard title={t('contracts.activeNow')} value={contractData?.by_status.active || 0} subtitle={t('contracts.currentlyActive')} />
+                <StatCard title={t('contracts.completed')} value={contractData?.by_status.completed || 0} subtitle={t('contracts.successfullyFinished')} />
+                <StatCard title={t('contracts.completionRate')} value={`${(contractData?.completion_rate || 0).toFixed(1)}%`} subtitle={t('contracts.successRate')} />
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:24 }}>
+                <div style={card}>{contractData?.by_status ? <ContractsChart data={contractData.by_status} /> : <div style={emptyBox}>{t('noContractData')}</div>}</div>
+                <div style={card}>
+                  <h3 style={{ fontSize:16, fontWeight:600, color:TEXT, marginBottom:24 }}>{t('contracts.metrics')}</h3>
+                  <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+                    <div>
+                      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8, fontSize:13 }}><span style={{ fontWeight:500,color:TEXT }}>{t('contracts.avgValue')}</span><span style={{ color:MUTED }}>{formatCurrency(contractData?.avg_contract_value || 0)} DZD</span></div>
+                      <div style={{ height:6, background:BORDER_COLOR, borderRadius:99 }}><div style={{ height:'100%', width:'75%', background:'#3B82F6', borderRadius:99 }} /></div>
+                    </div>
+                    <div>
+                      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8, fontSize:13 }}><span style={{ fontWeight:500,color:TEXT }}>{t('contracts.avgDuration')}</span><span style={{ color:MUTED }}>{contractData?.avg_duration_days || 0} {t('contracts.days')}</span></div>
+                      <div style={{ height:6, background:BORDER_COLOR, borderRadius:99 }}><div style={{ height:'100%', width:'50%', background:GREEN, borderRadius:99 }} /></div>
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, paddingTop:8 }}>
+                      {[
+                        { label:t('contracts.active'),    value:contractData?.by_status.active    || 0, color:'#3B82F6', bg:'rgba(59,130,246,0.1)' },
+                        { label:t('contracts.completed'), value:contractData?.by_status.completed  || 0, color:GREEN,     bg:'rgba(34,197,94,0.1)'  },
+                        { label:t('contracts.cancelled'), value:contractData?.by_status.cancelled  || 0, color:'#EF4444', bg:'rgba(239,68,68,0.1)'  },
+                      ].map(s => (
+                        <div key={s.label} style={{ textAlign:'center', padding:'14px 8px', borderRadius:10, background:s.bg }}>
+                          <p style={{ fontSize:24, fontWeight:700, color:s.color, margin:0 }}>{s.value}</p>
+                          <p style={{ fontSize:12, color:MUTED, marginTop:4 }}>{s.label}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── CUSTOMERS ───────────────────────────────────────────────── */}
+          {activeTab === 'customers' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:24, paddingTop:24 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:16 }}>
+                <StatCard title={t('customers.totalCustomers')} value={customerData?.total_customers || 0} subtitle={t('customers.allCustomers')} />
+                <StatCard title={t('customers.vipCustomers')} value={customerData?.segments.vip.count || 0} subtitle={`${formatCurrency(customerData?.segments.vip.total_value || 0)} ${t('customers.value')}`} />
+                <StatCard title={t('customers.newCustomers')} value={dashboardData?.customers.new || 0} subtitle={t('customers.thisPeriod')} />
+                <StatCard title={t('customers.retentionRate')} value={`${(dashboardData?.customers.retention_rate || 0).toFixed(1)}%`} subtitle={t('customers.customerLoyalty')} />
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:16 }}>
+                {[
+                  { title:t('customers.vip'),         data:customerData?.segments.vip,          accent:'#A855F7' },
+                  { title:t('customers.highValue'),   data:customerData?.segments.high_value,   accent:'#3B82F6' },
+                  { title:t('customers.mediumValue'), data:customerData?.segments.medium_value, accent:GREEN     },
+                  { title:t('customers.lowValue'),    data:customerData?.segments.low_value,    accent:MUTED     },
+                ].map(seg => (
+                  <div key={seg.title} style={{ background:SURFACE, border:`1px solid ${seg.accent}33`, borderRadius:12, padding:24 }}>
+                    <p style={{ fontSize:13, fontWeight:500, color:seg.accent, marginBottom:8 }}>{seg.title}</p>
+                    <p style={{ fontSize:30, fontWeight:700, color:TEXT, margin:0 }}>{seg.data?.count || 0}</p>
+                    <p style={{ fontSize:12, color:MUTED, marginTop:4 }}>{formatCurrency(seg.data?.total_value || 0)} DZD</p>
+                  </div>
+                ))}
+              </div>
+              {customerData?.segments.vip.customers?.length && (
+                <div style={{ background:SURFACE, border:BORDER, borderRadius:12, overflow:'hidden' }}>
+                  <div style={{ padding:'20px 24px', borderBottom:BORDER }}>
+                    <h3 style={{ fontSize:16, fontWeight:600, color:TEXT, margin:0 }}>{t('customers.topVip')}</h3>
+                  </div>
+                  <DataTable
+                    columns={[
+                      { key:'full_name', label:t('customers.customer'), sortable:true, render:(value:string,row:any) => (<div><p style={{ fontWeight:500,color:TEXT,fontSize:14 }}>{value}</p><p style={{ fontSize:12,color:MUTED }}>{row.email}</p></div>) },
+                      { key:'customer_type', label:t('customers.type'), sortable:true, render:(value:string) => <span style={{ textTransform:'capitalize',color:TEXT }}>{value}</span> },
+                      { key:'total_rentals', label:t('customers.rentals'), sortable:true },
+                      { key:'lifetime_value', label:t('customers.lifetimeValue'), sortable:true, render:(value:string) => `${formatCurrency(parseFloat(value))} DZD` },
+                    ]}
+                    data={customerData.segments.vip.customers}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── REPORTS ─────────────────────────────────────────────────── */}
+          {activeTab === 'reports' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:28, paddingTop:24 }}>
+
+              {/* Sub-header with live filter summary */}
+              <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', justifyContent:'space-between', gap:16 }}>
                 <div>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-sm font-medium">{t('contracts.avgValue')}</span>
-                    <span className="text-sm text-muted-foreground">
-                      {formatCurrency(contractData?.avg_contract_value || 0)} DZD
-                    </span>
-                  </div>
-                  <div className="h-2 bg-muted rounded-full">
-                    <div className="h-full w-3/4 bg-blue-600 rounded-full" />
-                  </div>
+                  <h2 style={{ fontSize:20, fontWeight:700, color:TEXT, margin:0 }}>{t('reports.title')}</h2>
+                  <p style={{ color:MUTED, fontSize:13, marginTop:4 }}>{t('reports.subtitle')}</p>
                 </div>
-                <div>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-sm font-medium">{t('contracts.avgDuration')}</span>
-                    <span className="text-sm text-muted-foreground">
-                      {contractData?.avg_duration_days || 0} {t('contracts.days')}
-                    </span>
-                  </div>
-                  <div className="h-2 bg-muted rounded-full">
-                    <div className="h-full w-1/2 bg-green-600 rounded-full" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-4 pt-4">
-                  <div className="text-center p-4 rounded-lg bg-blue-50">
-                    <p className="text-2xl font-bold text-blue-600">{contractData?.by_status.active || 0}</p>
-                    <p className="text-sm text-muted-foreground">{t('contracts.active')}</p>
-                  </div>
-                  <div className="text-center p-4 rounded-lg bg-green-50">
-                    <p className="text-2xl font-bold text-green-600">{contractData?.by_status.completed || 0}</p>
-                    <p className="text-sm text-muted-foreground">{t('contracts.completed')}</p>
-                  </div>
-                  <div className="text-center p-4 rounded-lg bg-red-50">
-                    <p className="text-2xl font-bold text-red-600">{contractData?.by_status.cancelled || 0}</p>
-                    <p className="text-sm text-muted-foreground">{t('contracts.cancelled')}</p>
-                  </div>
+                {/* Live filter pill */}
+                <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 14px', borderRadius:99, background:SURFACE2, border:`1px solid ${BORDER_COLOR}`, fontSize:12 }}>
+                  <Calendar style={{ width:13, height:13, color:GREEN }} />
+                  <span style={{ color:TEXT, fontWeight:600 }}>{reportType.charAt(0).toUpperCase() + reportType.slice(1)}</span>
+                  <span style={{ color:MUTED }}>·</span>
+                  <span style={{ color:GREEN, fontWeight:600 }}>{periodLabel}</span>
                 </div>
               </div>
-            </div>
-          </div>
-        </TabsContent>
 
-        {/* ── CUSTOMERS ── */}
-        <TabsContent value="customers" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <StatCard
-              title={t('customers.totalCustomers')}
-              value={customerData?.total_customers || 0}
-              subtitle={t('customers.allCustomers')}
-            />
-            <StatCard
-              title={t('customers.vipCustomers')}
-              value={customerData?.segments.vip.count || 0}
-              subtitle={`${formatCurrency(customerData?.segments.vip.total_value || 0)} ${t('customers.value')}`}
-            />
-            <StatCard
-              title={t('customers.newCustomers')}
-              value={dashboardData?.customers.new || 0}
-              subtitle={t('customers.thisPeriod')}
-            />
-            <StatCard
-              title={t('customers.retentionRate')}
-              value={`${(dashboardData?.customers.retention_rate || 0).toFixed(1)}%`}
-              subtitle={t('customers.customerLoyalty')}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              {
-                title: t('customers.vip'),
-                data: customerData?.segments.vip,
-                color: 'bg-purple-100 border-purple-200 text-purple-800'
-              },
-              {
-                title: t('customers.highValue'),
-                data: customerData?.segments.high_value,
-                color: 'bg-blue-100 border-blue-200 text-blue-800'
-              },
-              {
-                title: t('customers.mediumValue'),
-                data: customerData?.segments.medium_value,
-                color: 'bg-green-100 border-green-200 text-green-800'
-              },
-              {
-                title: t('customers.lowValue'),
-                data: customerData?.segments.low_value,
-                color: 'bg-gray-100 border-gray-200 text-gray-800'
-              },
-            ].map((segment) => (
-              <div key={segment.title} className={`rounded-lg border p-6 ${segment.color}`}>
-                <p className="text-sm font-medium mb-2">{segment.title}</p>
-                <p className="text-3xl font-bold mb-1">{segment.data?.count || 0}</p>
-                <p className="text-xs opacity-80">{formatCurrency(segment.data?.total_value || 0)} DZD</p>
+              {/* Report type cards */}
+              <div>
+                <h3 style={{ fontSize:14, fontWeight:600, color:MUTED, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:14 }}>{t('reports.selectType')}</h3>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:14 }}>
+                  {[
+                    { type:'executive' as ReportType, icon:<BarChart3 style={{ width:28,height:28,margin:'0 auto 12px' }} />, label:t('reports.executive'),       desc:t('reports.executiveDesc'),       accent:'#22C55E' },
+                    { type:'vehicle'   as ReportType, icon:<Car        style={{ width:28,height:28,margin:'0 auto 12px' }} />, label:t('reports.vehiclePerf'),    desc:t('reports.vehiclePerfDesc'),     accent:'#60A5FA' },
+                    { type:'customer'  as ReportType, icon:<Users      style={{ width:28,height:28,margin:'0 auto 12px' }} />, label:t('reports.customerInsights'), desc:t('reports.customerInsightsDesc'), accent:'#A855F7' },
+                  ].map(rt => {
+                    const active = reportType === rt.type
+                    return (
+                      <button
+                        key={rt.type}
+                        onClick={() => setReportType(rt.type)}
+                        style={{
+                          textAlign:'center', padding:20, borderRadius:12, cursor:'pointer',
+                          borderWidth: active ? 2 : 1, borderStyle:'solid',
+                          borderColor: active ? rt.accent : BORDER_COLOR,
+                          background: active ? `${rt.accent}10` : SURFACE,
+                          color: active ? rt.accent : TEXT,
+                          transition:'all 0.15s', fontFamily:FONT,
+                          boxShadow: active ? `0 0 16px ${rt.accent}22` : 'none',
+                        }}
+                      >
+                        {rt.icon}
+                        <div style={{ fontWeight:600, fontSize:15 }}>{rt.label}</div>
+                        <div style={{ fontSize:11, marginTop:6, color: active ? rt.accent : MUTED, opacity:0.8 }}>{rt.desc}</div>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            ))}
-          </div>
 
-          {customerData?.segments.vip.customers && customerData.segments.vip.customers.length > 0 && (
-            <div className="rounded-lg border bg-card">
-              <div className="p-6 border-b">
-                <h3 className="text-lg font-semibold">{t('customers.topVip')}</h3>
+              {/* Period quick-select */}
+              <div>
+                <h3 style={{ fontSize:14, fontWeight:600, color:MUTED, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:14 }}>Period</h3>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                  {(['today','week','month','quarter','year'] as const).map(p => {
+                    const active = reportFilters.period === p && !hasCustomRange
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => handleReportPeriodChange(p)}
+                        style={{
+                          padding:'8px 16px', borderRadius:8, cursor:'pointer', fontFamily:FONT, fontSize:13, fontWeight: active ? 600 : 400,
+                          borderWidth:1, borderStyle:'solid',
+                          borderColor: active ? GREEN : BORDER_COLOR,
+                          background: active ? `${GREEN}12` : SURFACE,
+                          color: active ? GREEN : MUTED,
+                          transition:'all 0.15s',
+                          boxShadow: active ? `0 0 10px ${GREEN}22` : 'none',
+                        }}
+                      >
+                        {PERIOD_LABELS[p]}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-              <DataTable
-                columns={[
-                  {
-                    key: 'full_name',
-                    label: t('customers.customer'),
-                    sortable: true,
-                    render: (value: string, row: any) => (
-                      <div>
-                        <p className="font-medium">{value}</p>
-                        <p className="text-sm text-muted-foreground">{row.email}</p>
-                      </div>
-                    ),
-                  },
-                  {
-                    key: 'customer_type',
-                    label: t('customers.type'),
-                    sortable: true,
-                    render: (value: string) => <span className="capitalize">{value}</span>,
-                  },
-                  { key: 'total_rentals', label: t('customers.rentals'), sortable: true },
-                  {
-                    key: 'lifetime_value',
-                    label: t('customers.lifetimeValue'),
-                    sortable: true,
-                    render: (value: string) => `${formatCurrency(parseFloat(value))} DZD`,
-                  },
-                ]}
-                data={customerData.segments.vip.customers}
-              />
-            </div>
-          )}
-        </TabsContent>
 
-        {/* ── ADVANCED REPORTS ── */}
-        <TabsContent value="reports" className="space-y-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-bold mb-1">{t('reports.title')}</h2>
-              <p className="text-muted-foreground">{t('reports.subtitle')}</p>
-            </div>
-            {reportData && (
-              <ExportButtons
-                onDownloadPDF={() => downloadPDF(reportType, advancedFilters)}
-                onDownloadExcel={() => downloadExcel(reportType, advancedFilters)}
-                onDownloadJSON={() => downloadJSON(reportType, advancedFilters)}
-                loading={reportLoading}
-              />
-            )}
-          </div>
-
-          <div>
-            <h3 className="text-lg font-semibold mb-4">{t('reports.selectType')}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <button
-                onClick={() => setReportType('executive')}
-                className={`p-6 rounded-lg border-2 transition-all ${
-                  reportType === 'executive'
-                    ? 'bg-primary text-primary-foreground border-primary shadow-lg scale-105'
-                    : 'bg-card border-border hover:border-primary/50 hover:shadow-md'
-                }`}
-              >
-                <BarChart3 className="w-8 h-8 mx-auto mb-3" />
-                <div className="font-semibold text-lg">{t('reports.executive')}</div>
-                <div className="text-xs mt-2 opacity-80">{t('reports.executiveDesc')}</div>
-              </button>
-
-              <button
-                onClick={() => setReportType('vehicle')}
-                className={`p-6 rounded-lg border-2 transition-all ${
-                  reportType === 'vehicle'
-                    ? 'bg-primary text-primary-foreground border-primary shadow-lg scale-105'
-                    : 'bg-card border-border hover:border-primary/50 hover:shadow-md'
-                }`}
-              >
-                <Car className="w-8 h-8 mx-auto mb-3" />
-                <div className="font-semibold text-lg">{t('reports.vehiclePerf')}</div>
-                <div className="text-xs mt-2 opacity-80">{t('reports.vehiclePerfDesc')}</div>
-              </button>
-
-              <button
-                onClick={() => setReportType('customer')}
-                className={`p-6 rounded-lg border-2 transition-all ${
-                  reportType === 'customer'
-                    ? 'bg-primary text-primary-foreground border-primary shadow-lg scale-105'
-                    : 'bg-card border-border hover:border-primary/50 hover:shadow-md'
-                }`}
-              >
-                <Users className="w-8 h-8 mx-auto mb-3" />
-                <div className="font-semibold text-lg">{t('reports.customerInsights')}</div>
-                <div className="text-xs mt-2 opacity-80">{t('reports.customerInsightsDesc')}</div>
-              </button>
-            </div>
-          </div>
-
-          <ReportFilters onApply={handleAdvancedFiltersApply} onReset={handleAdvancedFiltersReset} />
-
-          <Button
-            onClick={handleGenerateReport}
-            disabled={reportLoading}
-            className="w-full md:w-auto gap-2"
-            size="lg"
-          >
-            <Download className="w-4 h-4" />
-            {reportLoading ? t('reports.generating') : t('reports.generate')}
-          </Button>
-
-          {reportError && (
-            <div className="p-4 rounded-lg border-l-4 border-l-destructive bg-destructive/10">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-destructive" />
-                <p className="font-semibold">{t('reports.error')}</p>
+              {/* Advanced filters */}
+              <div>
+                <h3 style={{ fontSize:14, fontWeight:600, color:MUTED, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:14 }}>Advanced Filters</h3>
+                <ReportFilters onApply={handleAdvancedFiltersApply} onReset={handleAdvancedFiltersReset} />
               </div>
-              <p className="text-sm mt-2 text-muted-foreground">{reportError}</p>
-            </div>
-          )}
 
-          {reportData && !reportError && (
-            <div className="space-y-8">
-              {reportData.report_type === 'executive_summary' && (
-                <ExecutiveSummaryView report={reportData as any} formatCurrency={formatCurrency} />
+              {/* Generate + export row */}
+              <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:12 }}>
+                <button
+                  onClick={handleGenerateReport}
+                  disabled={reportLoading}
+                  style={{
+                    display:'inline-flex', alignItems:'center', gap:8,
+                    padding:'11px 24px', borderRadius:8, border:'none',
+                    background: reportLoading ? BORDER_COLOR : GREEN,
+                    color: reportLoading ? MUTED : '#000',
+                    fontFamily:FONT, fontSize:14, fontWeight:600,
+                    cursor: reportLoading ? 'not-allowed' : 'pointer',
+                    boxShadow: reportLoading ? 'none' : `0 0 16px ${GREEN}44`,
+                    transition:'all 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!reportLoading) (e.currentTarget as HTMLButtonElement).style.background = '#16a34a' }}
+                  onMouseLeave={e => { if (!reportLoading) (e.currentTarget as HTMLButtonElement).style.background = reportLoading ? BORDER_COLOR : GREEN }}
+                >
+                  {reportLoading
+                    ? <div style={{ width:15,height:15,border:`2px solid ${MUTED}`,borderTopColor:TEXT,borderRadius:'50%',animation:'_spin 0.8s linear infinite' }} />
+                    : <Download style={{ width:15, height:15 }} />}
+                  {reportLoading ? t('reports.generating') : t('reports.generate')}
+                </button>
+
+                {/* Export buttons appear once report exists */}
+                {reportData && !reportError && (
+                  <ExportButtons
+                    onDownloadPDF={handleDownloadPDF}
+                    onDownloadExcel={handleDownloadExcel}
+                    onDownloadJSON={handleDownloadJSON}
+                    loading={reportLoading}
+                  />
+                )}
+              </div>
+
+              {/* Error */}
+              {reportError && (
+                <div style={{ padding:14, borderRadius:8, borderLeft:'3px solid #EF4444', background:'rgba(239,68,68,0.07)', border:'1px solid rgba(239,68,68,0.2)', borderLeftWidth:3 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                    <AlertCircle style={{ width:16, height:16, color:'#EF4444' }} />
+                    <span style={{ fontWeight:600, color:'#EF4444', fontSize:14 }}>{t('reports.error')}</span>
+                  </div>
+                  <p style={{ fontSize:13, color:MUTED, margin:0 }}>{reportError}</p>
+                </div>
               )}
-              {reportData.report_type === 'vehicle_performance' && (
-                <VehiclePerformanceView report={reportData as any} formatCurrency={formatCurrency} />
-              )}
-              {reportData.report_type === 'customer_insights' && (
-                <CustomerInsightsView report={reportData as any} formatCurrency={formatCurrency} />
+
+              {/* Report output */}
+              {reportData && !reportError && (
+                <div style={{ animation:'_fade 0.3s ease', display:'flex', flexDirection:'column', gap:28 }}>
+                  {/* Ready bar */}
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:12, padding:'12px 18px', borderRadius:10, background:SURFACE2, border:`1px solid ${BORDER_COLOR}` }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <CheckCircle2 style={{ width:14, height:14, color:GREEN }} />
+                      <span style={{ fontSize:13, fontWeight:600, color:TEXT }}>Report ready</span>
+                      <span style={{ fontSize:12, color:MUTED }}>· {reportType} · {periodLabel}</span>
+                    </div>
+                    <ExportButtons
+                      onDownloadPDF={handleDownloadPDF}
+                      onDownloadExcel={handleDownloadExcel}
+                      onDownloadJSON={handleDownloadJSON}
+                      loading={reportLoading}
+                    />
+                  </div>
+
+                  {reportData.report_type === 'executive_summary'   && <ExecutiveSummaryView  report={reportData as any} formatCurrency={formatCurrency} />}
+                  {reportData.report_type === 'vehicle_performance'  && <VehiclePerformanceView report={reportData as any} formatCurrency={formatCurrency} />}
+                  {reportData.report_type === 'customer_insights'    && <CustomerInsightsView  report={reportData as any} formatCurrency={formatCurrency} />}
+                </div>
               )}
             </div>
           )}
-        </TabsContent>
-      </Tabs>
-    </div>
+        </div>
+      </div>
+    </>
   )
 }

@@ -365,6 +365,14 @@
       "generate": "Générer le rapport",
       "generating": "Génération en cours...",
       "error": "Erreur"
+    },
+    "periodSelector": {
+      "period": "Période",
+      "today": "Aujourd'hui",
+      "week": "Semaine",
+      "month": "Mois",
+      "quarter": "Trimestre",
+      "year": "Année"
     }
   },
   "attendance": {
@@ -827,6 +835,7 @@
     "extend": "Prolonger",
     "cancelContract": "Annuler",
     "viewPDF": "Voir PDF",
+    "downloadPDF": "Télécharger PDF",
     "loading": "Chargement des contrats...",
     "fullName": "Nom complet",
     "name": "Nom",
@@ -871,7 +880,8 @@
     "generatedOn": "Généré le",
     "createdBy": "Créé par",
     "none": "Aucun",
-    "pdfOpened": "PDF ouvert dans un nouvel onglet. Utilisez l'impression du navigateur (Ctrl+P) pour sauvegarder en PDF si nécessaire.",
+    "pdfOpened": "PDF ouvert dans un nouvel onglet. Utilisez l'impression du navigateur (Ctrl+P) pour enregistrer en PDF si nécessaire.",
+    "contractDownloaded": "Contrat téléchargé avec succès",
     "allowPopups": "Veuillez autoriser les pop-ups pour voir le PDF",
     "contractStatus": {
       "active": "Actif",

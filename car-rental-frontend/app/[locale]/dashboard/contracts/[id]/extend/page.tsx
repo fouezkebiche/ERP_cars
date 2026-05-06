@@ -12,6 +12,72 @@ import { ArrowLeft, Calendar, AlertCircle, Calculator } from "lucide-react"
 import { contractApi, Contract } from "@/lib/contractApi"
 import toast from "react-hot-toast"
 
+/* ─── design tokens ─────────────────────────────────────────── */
+const FONT    = "'Plus Jakarta Sans', system-ui, sans-serif"
+const GREEN   = "#22C55E"
+const SURFACE = "rgba(255,255,255,0.04)"
+const BORDER  = "rgba(255,255,255,0.07)"
+const MUTED   = "rgba(255,255,255,0.4)"
+
+/* ─── shared ui helpers ──────────────────────────────────────── */
+function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ padding: "24px 26px", borderRadius: 14, background: SURFACE, border: `1px solid ${BORDER}` }}>
+      <h2 style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.015em", marginBottom: 18, color: "#fff" }}>{title}</h2>
+      {children}
+    </div>
+  )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: MUTED, marginBottom: 6, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+      {children}
+    </label>
+  )
+}
+
+function StyledInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  const [focused, setFocused] = useState(false)
+  return (
+    <input
+      {...props}
+      onFocus={e => { setFocused(true); props.onFocus?.(e) }}
+      onBlur={e => { setFocused(false); props.onBlur?.(e) }}
+      style={{
+        width: "100%", padding: "10px 13px", borderRadius: 9,
+        border: `1px solid ${focused ? "rgba(34,197,94,0.5)" : BORDER}`,
+        background: "rgba(255,255,255,0.03)", color: "#fff",
+        fontFamily: FONT, fontSize: 14, outline: "none",
+        transition: "border-color 0.2s",
+        boxShadow: focused ? "0 0 0 3px rgba(34,197,94,0.08)" : "none",
+        ...props.style,
+      }}
+    />
+  )
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p style={{ fontSize: 11, color: MUTED, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</p>
+      <p style={{ fontSize: 14, fontWeight: 600, color: "#fff" }}>{value}</p>
+    </div>
+  )
+}
+
+function SummaryRow({ label, value, accent, large, border }: { label: string; value: string; accent?: string; large?: boolean; border?: boolean }) {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      paddingTop: border ? 10 : 0, borderTop: border ? `1px solid ${BORDER}` : "none", marginTop: border ? 8 : 0,
+    }}>
+      <span style={{ fontSize: large ? 14 : 12, color: MUTED }}>{label}</span>
+      <span style={{ fontSize: large ? 16 : 13, fontWeight: large ? 800 : 600, color: accent || "#fff" }}>{value}</span>
+    </div>
+  )
+}
+
 export default function ExtendContractPage() {
   const t = useTranslations("contracts")
   const router = useRouter()
@@ -20,55 +86,31 @@ export default function ExtendContractPage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
-  const [formData, setFormData] = useState({
-    new_end_date: "",
-    notes: "",
-  })
+  const [formData, setFormData] = useState({ new_end_date: "", notes: "" })
 
   const [calculations, setCalculations] = useState({
-    current_days: 0,
-    extension_days: 0,
-    new_total_days: 0,
-    extension_cost: 0,
-    new_base_amount: 0,
-    new_tax_amount: 0,
-    new_total_amount: 0,
-    additional_payment: 0,
+    current_days: 0, extension_days: 0, new_total_days: 0, extension_cost: 0,
+    new_base_amount: 0, new_tax_amount: 0, new_total_amount: 0, additional_payment: 0,
   })
 
-  useEffect(() => {
-    if (params?.id) {
-      fetchContract()
-    }
-  }, [params?.id])
+  useEffect(() => { if (params?.id) fetchContract() }, [params?.id])
 
-  useEffect(() => {
-    if (contract && formData.new_end_date) {
-      calculateExtension()
-    }
-  }, [formData.new_end_date, contract])
+  useEffect(() => { if (contract && formData.new_end_date) calculateExtension() }, [formData.new_end_date, contract])
 
   const fetchContract = async () => {
     try {
       setLoading(true)
       const response = await contractApi.getById(params.id as string)
       const fetchedContract = response.data.contract
-
       if (fetchedContract.status !== "active") {
         toast.error(t("noActiveContracts"))
         router.push(`/dashboard/contracts/${params.id}`)
         return
       }
-
       setContract(fetchedContract)
-
-      // Set minimum date to current end date + 1 day
       const currentEndDate = new Date(fetchedContract.end_date)
       currentEndDate.setDate(currentEndDate.getDate() + 1)
-      setFormData(prev => ({
-        ...prev,
-        new_end_date: currentEndDate.toISOString().split('T')[0],
-      }))
+      setFormData(prev => ({ ...prev, new_end_date: currentEndDate.toISOString().split('T')[0] }))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("failedToLoad"))
       router.push("/dashboard/contracts")
@@ -79,65 +121,35 @@ export default function ExtendContractPage() {
 
   const calculateExtension = () => {
     if (!contract) return
-
     const currentEndDate = new Date(contract.end_date)
     const newEndDate = new Date(formData.new_end_date)
-
-    // Calculate extension days
     const extensionDays = Math.ceil((newEndDate.getTime() - currentEndDate.getTime()) / (1000 * 60 * 60 * 24))
-
-    if (extensionDays <= 0) {
-      return
-    }
-
-    // Calculate new totals
+    if (extensionDays <= 0) return
     const startDate = new Date(contract.start_date)
     const newTotalDays = Math.ceil((newEndDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
-
     const dailyRate = parseFloat(contract.daily_rate)
     const newBaseAmount = dailyRate * newTotalDays
     const additionalCharges = parseFloat(contract.additional_charges)
     const discountAmount = parseFloat(contract.discount_amount)
-
     const newSubtotal = newBaseAmount + additionalCharges - discountAmount
     const newTaxAmount = newSubtotal * 0.19
     const newTotalAmount = newSubtotal + newTaxAmount
-
     const extensionCost = dailyRate * extensionDays
     const currentTotal = parseFloat(contract.total_amount)
     const additionalPayment = newTotalAmount - currentTotal
-
-    setCalculations({
-      current_days: contract.total_days,
-      extension_days: extensionDays,
-      new_total_days: newTotalDays,
-      extension_cost: extensionCost,
-      new_base_amount: newBaseAmount,
-      new_tax_amount: newTaxAmount,
-      new_total_amount: newTotalAmount,
-      additional_payment: additionalPayment,
-    })
+    setCalculations({ current_days: contract.total_days, extension_days: extensionDays, new_total_days: newTotalDays, extension_cost: extensionCost, new_base_amount: newBaseAmount, new_tax_amount: newTaxAmount, new_total_amount: newTotalAmount, additional_payment: additionalPayment })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
     if (!contract) return
-
-    // Validation
     if (new Date(formData.new_end_date) <= new Date(contract.end_date)) {
       toast.error(`${t("newEndDate")} ${t("mustBeAfter")} ${t("endDate")}`)
       return
     }
-
     try {
       setSubmitting(true)
-
-      await contractApi.extend(contract.id, {
-        new_end_date: formData.new_end_date,
-        notes: formData.notes,
-      })
-
+      await contractApi.extend(contract.id, { new_end_date: formData.new_end_date, notes: formData.notes })
       toast.success(t("extendSuccess"))
       router.push(`/dashboard/contracts/${contract.id}`)
     } catch (error) {
@@ -147,18 +159,13 @@ export default function ExtendContractPage() {
     }
   }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    })
-  }
+  const formatDate = (dateString: string) => new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div style={{ display: "flex", justifyContent: "center", padding: "64px 0" }}>
+        <div style={{ width: 40, height: 40, borderRadius: "50%", border: `3px solid ${BORDER}`, borderTopColor: GREEN, animation: "spin 0.8s linear infinite" }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     )
   }
@@ -170,224 +177,180 @@ export default function ExtendContractPage() {
   const minDateString = minDate.toISOString().split('T')[0]
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => router.back()}>
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
+    <div style={{ fontFamily: FONT, color: "#fff", minHeight: "100vh", padding: "32px 0" }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 32 }}>
+        <button onClick={() => router.back()}
+          style={{
+            width: 36, height: 36, borderRadius: 10, border: `1px solid ${BORDER}`,
+            background: SURFACE, color: MUTED, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(34,197,94,0.3)"; e.currentTarget.style.color = "#fff" }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = BORDER; e.currentTarget.style.color = MUTED }}
+        >
+          <ArrowLeft size={16} />
+        </button>
         <div>
-          <h1 className="text-3xl font-bold">{t("extendContract")}</h1>
-          <p className="text-muted-foreground">{contract.contract_number}</p>
+          <h1 style={{ fontSize: "clamp(1.5rem,3vw,2rem)", fontWeight: 800, letterSpacing: "-0.035em", marginBottom: 4 }}>
+            {t("extendContract")}
+          </h1>
+          <p style={{ fontSize: 13, color: MUTED, fontFamily: "monospace" }}>{contract.contract_number}</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Form */}
-        <div className="lg:col-span-2">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Current Contract Info */}
-            <div className="p-6 rounded-lg border bg-card">
-              <h2 className="text-lg font-semibold mb-4">{t("contractInformation")}</h2>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground">{t("customer")}</p>
-                  <p className="font-medium">{contract.customer?.full_name}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">{t("vehicle")}</p>
-                  <p className="font-medium">
-                    {contract.vehicle?.brand} {contract.vehicle?.model}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">{t("startDate")}</p>
-                  <p className="font-medium">{formatDate(contract.start_date)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">{t("endDate")}</p>
-                  <p className="font-medium">{formatDate(contract.end_date)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">{t("totalDays")}</p>
-                  <p className="font-medium">{contract.total_days} days</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">{t("dailyRate")}</p>
-                  <p className="font-medium">{parseFloat(contract.daily_rate).toLocaleString()} DZD</p>
-                </div>
-              </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20, alignItems: "start" }}>
+
+        {/* ── Left ── */}
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* Current Contract Info */}
+          <SectionCard title={t("contractInformation")}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <InfoRow label={t("customer")} value={contract.customer?.full_name || "—"} />
+              <InfoRow label={t("vehicle")} value={`${contract.vehicle?.brand} ${contract.vehicle?.model}`} />
+              <InfoRow label={t("startDate")} value={formatDate(contract.start_date)} />
+              <InfoRow label={t("endDate")} value={formatDate(contract.end_date)} />
+              <InfoRow label={t("totalDays")} value={`${contract.total_days} days`} />
+              <InfoRow label={t("dailyRate")} value={`${parseFloat(contract.daily_rate).toLocaleString()} DZD`} />
+            </div>
+          </SectionCard>
+
+          {/* Extension Details */}
+          <SectionCard title={t("extensionDetails")}>
+            <div>
+              <FieldLabel>{t("newEndDate")} *</FieldLabel>
+              <StyledInput type="date" min={minDateString} value={formData.new_end_date} required
+                onChange={e => setFormData({ ...formData, new_end_date: e.target.value })} />
+              <p style={{ fontSize: 11, color: MUTED, marginTop: 6 }}>
+                {t("mustBeAfter")} {formatDate(contract.end_date)}
+              </p>
             </div>
 
-            {/* Extension Details */}
-            <div className="p-6 rounded-lg border bg-card">
-              <h2 className="text-lg font-semibold mb-4">{t("extensionDetails")}</h2>
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="new_end_date">{t("newEndDate")} *</Label>
-                  <Input
-                    id="new_end_date"
-                    type="date"
-                    min={minDateString}
-                    value={formData.new_end_date}
-                    onChange={(e) => setFormData({ ...formData, new_end_date: e.target.value })}
-                    required
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {t("mustBeAfter")} {formatDate(contract.end_date)}
-                  </p>
+            {calculations.extension_days > 0 && (
+              <div style={{
+                marginTop: 16, padding: "16px", borderRadius: 10,
+                background: "rgba(56,189,248,0.05)", border: "1px solid rgba(56,189,248,0.18)",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <Calculator size={14} style={{ color: "#38BDF8" }} />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#38BDF8" }}>{t("extensionDetails")}</span>
                 </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  {[
+                    { label: `${t("extensionDays")}:`, value: `${calculations.extension_days} days` },
+                    { label: `${t("extensionCost")}:`, value: `${calculations.extension_cost.toLocaleString()} DZD` },
+                    { label: `${t("newTotalDays")}:`, value: `${calculations.new_total_days} days` },
+                    { label: `${t("additionalPayment")}:`, value: `${calculations.additional_payment.toLocaleString()} DZD` },
+                  ].map((row, i) => (
+                    <div key={i}>
+                      <p style={{ fontSize: 11, color: "rgba(56,189,248,0.7)", marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.05em" }}>{row.label}</p>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{row.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </SectionCard>
 
-                {calculations.extension_days > 0 && (
-                  <div className="p-4 bg-blue-50 dark:bg-blue-950 rounded-lg space-y-2">
-                    <div className="flex items-center gap-2 text-blue-800 dark:text-blue-200 font-medium">
-                      <Calculator className="w-4 h-4" />
-                      <span>{t("extensionDetails")}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <p className="text-blue-600 dark:text-blue-400">{t("extensionDays")}:</p>
-                        <p className="font-semibold text-blue-900 dark:text-blue-100">
-                          {calculations.extension_days} days
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-blue-600 dark:text-blue-400">{t("extensionCost")}:</p>
-                        <p className="font-semibold text-blue-900 dark:text-blue-100">
-                          {calculations.extension_cost.toLocaleString()} DZD
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-blue-600 dark:text-blue-400">{t("newTotalDays")}:</p>
-                        <p className="font-semibold text-blue-900 dark:text-blue-100">
-                          {calculations.new_total_days} days
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-blue-600 dark:text-blue-400">{t("additionalPayment")}:</p>
-                        <p className="font-semibold text-blue-900 dark:text-blue-100">
-                          {calculations.additional_payment.toLocaleString()} DZD
-                        </p>
-                      </div>
-                    </div>
+          {/* Warning */}
+          <div style={{
+            padding: "14px 16px", borderRadius: 10,
+            background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.2)",
+            display: "flex", alignItems: "flex-start", gap: 10,
+          }}>
+            <AlertCircle size={15} style={{ color: "#FBB324", marginTop: 1, flexShrink: 0 }} />
+            <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+              <p style={{ fontWeight: 600, color: "#FBB324", marginBottom: 3 }}>{t("extensionDetails")}</p>
+              <p style={{ color: "rgba(251,191,36,0.7)" }}>{t("availabilityCheck")}</p>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <SectionCard title={t("notes")}>
+            <textarea
+              placeholder="Add notes about extension reason, any special terms, or additional comments..."
+              rows={4} value={formData.notes}
+              onChange={e => setFormData({ ...formData, notes: e.target.value })}
+              style={{
+                width: "100%", padding: "11px 13px", borderRadius: 9,
+                border: `1px solid ${BORDER}`, background: "rgba(255,255,255,0.03)",
+                color: "#fff", fontFamily: FONT, fontSize: 13, resize: "vertical",
+                outline: "none", transition: "border-color 0.2s", lineHeight: 1.6,
+              }}
+              onFocus={e => (e.currentTarget.style.borderColor = "rgba(34,197,94,0.4)")}
+              onBlur={e => (e.currentTarget.style.borderColor = BORDER)}
+            />
+          </SectionCard>
+
+          <button type="submit"
+            disabled={submitting || calculations.extension_days <= 0}
+            style={{
+              width: "100%", padding: "13px 0", borderRadius: 10,
+              border: "none", cursor: (submitting || calculations.extension_days <= 0) ? "not-allowed" : "pointer",
+              background: (submitting || calculations.extension_days <= 0) ? "rgba(56,189,248,0.3)" : "#0EA5E9",
+              color: "#fff", fontFamily: FONT, fontWeight: 600, fontSize: 14,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              transition: "all 0.2s", boxShadow: "0 0 20px rgba(14,165,233,0.2)",
+            }}
+            onMouseEnter={e => { if (!submitting && calculations.extension_days > 0) e.currentTarget.style.background = "#0284C7" }}
+            onMouseLeave={e => { if (!submitting && calculations.extension_days > 0) e.currentTarget.style.background = "#0EA5E9" }}
+          >
+            {submitting ? (
+              <>
+                <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", animation: "spin 0.8s linear infinite" }} />
+                {t("saving")}
+              </>
+            ) : (
+              <><Calendar size={15} />{t("extendContract")}</>
+            )}
+          </button>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </form>
+
+        {/* ── Right — Summary ── */}
+        <div style={{ position: "sticky", top: 24 }}>
+          <div style={{ padding: "24px 22px", borderRadius: 14, background: SURFACE, border: `1px solid ${BORDER}` }}>
+            <h2 style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.015em", marginBottom: 20 }}>{t("financialSummary")}</h2>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingBottom: 16, borderBottom: `1px solid ${BORDER}` }}>
+              <p style={{ fontSize: 11, color: MUTED, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{t("contractInformation")}</p>
+              <SummaryRow label={`${t("totalAmount")}:`} value={`${parseFloat(contract.total_amount).toLocaleString()} DZD`} />
+            </div>
+
+            {calculations.extension_days > 0 && (
+              <div style={{ paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+                <p style={{ fontSize: 11, color: MUTED, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{t("extensionDetails")}</p>
+                <SummaryRow label={`${t("dailyRate")}:`} value={`${parseFloat(contract.daily_rate).toLocaleString()} DZD`} />
+                <SummaryRow label={`${t("extensionDays")}:`} value={String(calculations.extension_days)} />
+                <SummaryRow label={`${t("extensionCost")}:`} value={`${calculations.extension_cost.toLocaleString()} DZD`} />
+                <SummaryRow label={`${t("newTotalDays")}:`} value={`${calculations.new_total_days} days`} />
+
+                <div style={{ marginTop: 8, paddingTop: 16, borderTop: `1px solid ${BORDER}` }}>
+                  <p style={{ fontSize: 11, color: MUTED, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>{t("newTotalAmount")}:</p>
+                  <SummaryRow label={`${t("baseAmount")}:`} value={`${calculations.new_base_amount.toLocaleString()} DZD`} />
+                  <div style={{ marginTop: 8 }}>
+                    <SummaryRow label={`${t("tax")}:`} value={`${calculations.new_tax_amount.toLocaleString()} DZD`} />
                   </div>
-                )}
+                  <SummaryRow label={`${t("newTotalAmount")}:`} value={`${calculations.new_total_amount.toLocaleString()} DZD`} accent={GREEN} large border />
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Availability Check Info */}
-            <div className="p-4 bg-amber-50 dark:bg-amber-950 rounded-lg flex items-start gap-2">
-              <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm">
-                <p className="font-medium text-amber-800 dark:text-amber-200 mb-1">
-                  {t("extensionDetails")}
+            {calculations.additional_payment > 0 && (
+              <div style={{
+                marginTop: 16, padding: "14px 16px", borderRadius: 10,
+                background: "rgba(34,197,94,0.07)", border: "1px solid rgba(34,197,94,0.22)",
+              }}>
+                <p style={{ fontSize: 11, fontWeight: 600, color: GREEN, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  {t("additionalPayment")} {t("required")}
                 </p>
-                <p className="text-amber-700 dark:text-amber-300">
-                  {t("availabilityCheck")}
+                <p style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.04em", color: "#fff" }}>
+                  {calculations.additional_payment.toLocaleString()} DZD
                 </p>
               </div>
-            </div>
-
-            {/* Extension Notes */}
-            <div className="p-6 rounded-lg border bg-card">
-              <h2 className="text-lg font-semibold mb-4">{t("notes")}</h2>
-              <Textarea
-                placeholder="Add notes about extension reason, any special terms, or additional comments..."
-                rows={4}
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              />
-            </div>
-
-            <Button 
-              type="submit" 
-              className="w-full bg-blue-600 hover:bg-blue-700" 
-              disabled={submitting || calculations.extension_days <= 0}
-            >
-              {submitting ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                  {t("saving")}
-                </>
-              ) : (
-                <>
-                  <Calendar className="w-4 h-4 mr-2" />
-                  {t("extendContract")}
-                </>
-              )}
-            </Button>
-          </form>
-        </div>
-
-        {/* Summary Panel */}
-        <div className="lg:col-span-1">
-          <div className="p-6 rounded-lg border bg-card sticky top-6">
-            <h2 className="text-lg font-semibold mb-4">{t("financialSummary")}</h2>
-            <div className="space-y-4 text-sm">
-              <div className="pb-3 border-b">
-                <p className="text-muted-foreground mb-2">{t("contractInformation")}</p>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("totalAmount")}:</span>
-                  <span className="font-medium">
-                    {parseFloat(contract.total_amount).toLocaleString()} DZD
-                  </span>
-                </div>
-              </div>
-
-              {calculations.extension_days > 0 && (
-                <div>
-                  <div className="pb-3 border-b">
-                    <p className="text-muted-foreground mb-2">{t("extensionDetails")}</p>
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">{t("dailyRate")}:</span>
-                        <span>{parseFloat(contract.daily_rate).toLocaleString()} DZD</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">{t("extensionDays")}:</span>
-                        <span className="font-medium">{calculations.extension_days}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">{t("extensionCost")}:</span>
-                        <span className="font-medium">{calculations.extension_cost.toLocaleString()} DZD</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">{t("newTotalDays")}:</span>
-                        <span className="font-medium">{calculations.new_total_days}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground mb-2">{t("newTotalAmount")}:</p>
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">{t("baseAmount")}:</span>
-                        <span>{calculations.new_base_amount.toLocaleString()} DZD</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">{t("tax")}:</span>
-                        <span>{calculations.new_tax_amount.toLocaleString()} DZD</span>
-                      </div>
-                      <div className="border-t pt-2 flex justify-between text-lg font-bold">
-                        <span>{t("newTotalAmount")}:</span>
-                        <span className="text-primary">{calculations.new_total_amount.toLocaleString()} DZD</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {calculations.additional_payment > 0 && (
-                <div className="p-3 bg-green-50 dark:bg-green-950 rounded-lg mt-4">
-                  <p className="text-xs font-medium text-green-800 dark:text-green-200 mb-1">
-                    {t("additionalPayment")} {t("required")}
-                  </p>
-                  <p className="text-2xl font-bold text-green-900 dark:text-green-100">
-                    {calculations.additional_payment.toLocaleString()} DZD
-                  </p>
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>

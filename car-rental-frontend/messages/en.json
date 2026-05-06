@@ -365,6 +365,14 @@
       "generate": "Generate Report",
       "generating": "Generating...",
       "error": "Error"
+    },
+    "periodSelector": {
+      "period": "Period",
+      "today": "Today",
+      "week": "Week",
+      "month": "Month",
+      "quarter": "Quarter",
+      "year": "Year"
     }
   },
   "attendance": {
@@ -831,6 +839,7 @@
     "extend": "Extend",
     "cancelContract": "Cancel",
     "viewPDF": "View PDF",
+    "downloadPDF": "Download PDF",
     "loading": "Loading contracts...",
     "failedToLoad": "Failed to load contracts",
     "deleteConfirm": "Are you sure you want to delete contract {contractNumber}? This action cannot be undone.",
@@ -874,6 +883,7 @@
     "createdBy": "Created by",
     "none": "None",
     "pdfOpened": "PDF opened in new tab. Use browser print (Ctrl+P) to save as PDF if needed.",
+    "contractDownloaded": "Contract downloaded successfully",
     "allowPopups": "Please allow pop-ups to view PDF",
     "contractStatus": {
       "active": "Active",
