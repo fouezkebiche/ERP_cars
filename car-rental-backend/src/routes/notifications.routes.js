@@ -4,10 +4,12 @@ const { Notification, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
+const { requireActiveSubscription } = require('../middleware/subscription.middleware');
 
 // Apply auth & tenant isolation
 router.use(authenticateToken);
 router.use(injectCompanyId);
+router.use(requireActiveSubscription);
 
 // GET /api/notifications?priority=critical&limit=5&unread=true&dismissed=false&type=km_limit_*&data[vehicle_id]=abc123
 // Fetches company-specific notifications (filtered/sorted)

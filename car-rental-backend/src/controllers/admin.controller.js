@@ -9,11 +9,16 @@ const { Op } = require('sequelize');
 // ============================================
 const getPlatformStats = async (req, res) => {
   try {
+    const pendingSubscriptionFilter = sequelize.literal(
+      `(settings->'subscription_request'->>'pending') = 'true'`
+    );
+
     const [
       totalCompanies,
       activeCompanies,
       trialCompanies,
       suspendedCompanies,
+      pendingSubscriptionRequests,
       totalUsers,
       totalVehicles,
       totalContracts,
@@ -23,6 +28,7 @@ const getPlatformStats = async (req, res) => {
       Company.count({ where: { subscription_status: 'active' } }),
       Company.count({ where: { subscription_status: 'trial' } }),
       Company.count({ where: { subscription_status: 'suspended' } }),
+      Company.count({ where: pendingSubscriptionFilter }),
       User.count(),
       Vehicle.count({ where: { status: { [Op.ne]: 'retired' } } }),
       Contract.count(),
@@ -66,6 +72,7 @@ const getPlatformStats = async (req, res) => {
           active: activeCompanies,
           trial: trialCompanies,
           suspended: suspendedCompanies,
+          pending_subscription_requests: pendingSubscriptionRequests,
           new_this_month: newThis,
           growth_percentage: parseFloat(growth.toFixed(1)),
         },
@@ -93,7 +100,7 @@ const getPlatformStats = async (req, res) => {
 // ============================================
 const getAllCompanies = async (req, res) => {
   try {
-    const { status, plan, search, page = 1, limit = 20, sort_by = 'created_at', sort_order = 'DESC' } = req.query;
+    const { status, plan, search, pending_subscription, page = 1, limit = 20, sort_by = 'created_at', sort_order = 'DESC' } = req.query;
 
     const where = {};
     if (status) where.subscription_status = status;
@@ -102,6 +109,12 @@ const getAllCompanies = async (req, res) => {
       where[Op.or] = [
         { name:  { [Op.iLike]: `%${search}%` } },
         { email: { [Op.iLike]: `%${search}%` } },
+      ];
+    }
+    if (pending_subscription === 'true') {
+      where[Op.and] = [
+        ...(where[Op.and] || []),
+        sequelize.literal(`(settings->'subscription_request'->>'pending') = 'true'`),
       ];
     }
 
@@ -121,7 +134,14 @@ const getAllCompanies = async (req, res) => {
           User.count({ where: { company_id: c.id } }),
           Vehicle.count({ where: { company_id: c.id, status: { [Op.ne]: 'retired' } } }),
         ]);
-        return { ...c.toJSON(), user_count, vehicle_count };
+        const json = c.toJSON();
+        return {
+          ...json,
+          user_count,
+          vehicle_count,
+          subscription_request_pending: json.settings?.subscription_request?.pending === true,
+          subscription_request: json.settings?.subscription_request || null,
+        };
       })
     );
 
@@ -200,10 +220,34 @@ const updateSubscription = async (req, res) => {
       updateData.monthly_recurring_revenue = monthly_recurring_revenue;
     }
 
+    if (subscription_status === 'active') {
+      const settings = { ...(company.settings || {}) };
+      if (settings.subscription_request?.pending) {
+        settings.subscription_request = {
+          ...settings.subscription_request,
+          pending: false,
+          approved_at: new Date().toISOString(),
+          approved_by: req.user?.email || 'admin',
+        };
+      }
+      updateData.settings = settings;
+    }
+
     await company.update(updateData);
+    await company.reload();
     console.log(`🔄 Admin updated subscription for ${company.name}`);
 
-    sendSuccess(res, { message: 'Subscription updated successfully', data: { company } });
+    const companyJson = company.toJSON();
+    sendSuccess(res, {
+      message: 'Subscription updated successfully',
+      data: {
+        company: {
+          ...companyJson,
+          subscription_request_pending: companyJson.settings?.subscription_request?.pending === true,
+          subscription_request: companyJson.settings?.subscription_request || null,
+        },
+      },
+    });
   } catch (error) {
     console.error('💥 Admin update subscription error:', error);
     sendError(res, { statusCode: 500, message: 'Failed to update subscription', details: error.message });

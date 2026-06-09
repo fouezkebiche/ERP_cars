@@ -37,7 +37,7 @@ function Field({
       </label>
       <div style={{ position: "relative" }}>
         <input
-          id={id} type={type} placeholder={placeholder} value={value}
+          id={id} name={id} type={type} placeholder={placeholder} value={value}
           onChange={onChange} disabled={disabled}
           onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
           style={{
@@ -172,7 +172,7 @@ export default function SignupPage() {
       if (!formData.termsAccepted) throw new Error(t("errorTerms"))
       if (formData.password.length < 6) throw new Error(t("errorPasswordLength"))
 
-      const companyRes = await fetch("http://localhost:5000/api/companies", {
+      const companyRes = await fetch(`${API_URL}/api/companies`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ name: formData.company, email: formData.email, phone: formData.phone, subscription_plan: formData.plan, subscription_status: "trial" }),
       })
@@ -183,14 +183,14 @@ export default function SignupPage() {
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
       if (!uuidRegex.test(companyId)) throw new Error(`Invalid company ID format: ${companyId}`)
 
-      const regRes = await fetch("http://localhost:5000/api/auth/register", {
+      const regRes = await fetch(`${API_URL}/api/auth/register`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ full_name: formData.company, email: formData.email, password: formData.password, company_id: companyId, role: "admin" }),
       })
       const regData = await regRes.json()
       if (!regRes.ok) throw new Error(regData.message || "Registration failed")
 
-      const loginRes = await fetch("http://localhost:5000/api/auth/login", {
+      const loginRes = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ email: formData.email, password: formData.password }),
       })
@@ -198,7 +198,7 @@ export default function SignupPage() {
       if (!loginRes.ok) throw new Error(loginData.message || "Auto-login failed")
       localStorage.setItem("accessToken", loginData.data.accessToken)
       localStorage.setItem("refreshToken", loginData.data.refreshToken)
-      router.push("/dashboard")
+      router.push(`/${locale}/dashboard`)
     } catch (err: any) {
       clearTimeout(timeoutId)
       setError(err.name === "AbortError" ? t("errorTimeout") : err.message)
@@ -245,7 +245,7 @@ export default function SignupPage() {
           <span style={{ background: "linear-gradient(120deg,#22C55E,#86EFAC)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>rental agencies.</span>
         </h2>
         <p style={{ fontSize: 14, color: "rgba(255,255,255,0.38)", lineHeight: 1.65, marginBottom: 44 }}>
-          Start your 14-day free trial. No credit card required.
+          Start your 30-day free trial. No credit card required.
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>

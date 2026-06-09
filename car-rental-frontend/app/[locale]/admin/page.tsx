@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useTranslations } from "next-intl"
+import Link from "next/link"
+import { useTranslations, useLocale } from "next-intl"
 import {
   TrendingUp, TrendingDown, Building2, Users, DollarSign,
   FileText, AlertTriangle, CheckCircle, RefreshCw, Car
@@ -139,7 +140,9 @@ export default function AdminDashboard() {
   const activeContracts = stats?.contracts?.active ?? "—"
   const totalCompanies  = stats?.companies?.total ?? "—"
   const suspended    = stats?.companies?.suspended || 0
+  const pendingRequests = stats?.companies?.pending_subscription_requests || 0
   const growthPct    = stats?.companies?.growth_percentage
+  const locale = useLocale()
 
   const planColors: Record<string, string> = {
     enterprise:   "#c084fc",
@@ -178,6 +181,23 @@ export default function AdminDashboard() {
             {error}
           </span>
           <button onClick={() => load()} className="ml-auto text-xs underline" style={{ color: "#f87171" }}>Retry</button>
+        </div>
+      )}
+
+      {pendingRequests > 0 && (
+        <div className="rounded-xl px-5 py-4 flex flex-wrap items-center gap-4"
+          style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.25)" }}>
+          <AlertTriangle size={18} style={{ color: "#fbbf24" }} />
+          <p className="text-sm flex-1" style={{ color: "#fde68a", fontFamily: "monospace" }}>
+            {t("pendingRequestsAlert", { count: pendingRequests })}
+          </p>
+          <Link
+            href={`/${locale}/admin/companies?pending=1`}
+            className="text-xs font-semibold px-3 py-2 rounded-lg"
+            style={{ background: "rgba(251,191,36,0.15)", color: "#fbbf24", fontFamily: "monospace" }}
+          >
+            {t("viewPendingRequests")} →
+          </Link>
         </div>
       )}
 

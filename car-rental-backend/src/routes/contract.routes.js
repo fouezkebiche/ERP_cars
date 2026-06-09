@@ -28,12 +28,14 @@ const { getContractPayments } = require('../controllers/payment.controller');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { requireRole } = require('../middleware/permissions.middleware');
 const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
+const { requireActiveSubscription } = require('../middleware/subscription.middleware');
 
 // ============================================
 // APPLY MIDDLEWARE TO ALL ROUTES
 // ============================================
 router.use(authenticateToken);
 router.use(injectCompanyId);
+router.use(requireActiveSubscription);
 
 // ============================================
 // GLOBAL CONTRACT ROUTES (MUST BE FIRST)

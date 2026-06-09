@@ -22,6 +22,18 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+export interface SubscriptionRequest {
+  pending: boolean
+  requested_at?: string
+  requested_by?: string
+  requested_by_name?: string
+  requested_by_role?: string
+  plan?: string
+  message?: string | null
+  approved_at?: string
+  approved_by?: string
+}
+
 export interface Company {
   id: string
   name: string
@@ -36,6 +48,8 @@ export interface Company {
   created_at: string
   user_count?: number
   vehicle_count?: number
+  subscription_request_pending?: boolean
+  subscription_request?: SubscriptionRequest | null
 }
 
 export interface CompanyDetail extends Company {
@@ -60,6 +74,7 @@ export interface PlatformStats {
     active: number
     trial: number
     suspended: number
+    pending_subscription_requests: number
     new_this_month: number
     growth_percentage: number
   }
@@ -76,6 +91,7 @@ export interface CompaniesQuery {
   status?: "active" | "inactive" | "trial" | "suspended"
   plan?: "basic" | "professional" | "enterprise"
   search?: string
+  pending_subscription?: boolean
   page?: number
   limit?: number
   sort_by?: string
@@ -114,6 +130,7 @@ export async function fetchAllCompanies(
   if (query.limit) params.set("limit", String(query.limit))
   if (query.sort_by) params.set("sort_by", query.sort_by)
   if (query.sort_order) params.set("sort_order", query.sort_order)
+  if (query.pending_subscription) params.set("pending_subscription", "true")
 
   const res = await fetch(`${API_URL}/api/admin/companies?${params.toString()}`, {
     headers: getAuthHeaders(),

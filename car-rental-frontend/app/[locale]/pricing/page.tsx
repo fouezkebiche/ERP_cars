@@ -425,7 +425,7 @@ export default function PricingPage() {
               {t("ctaButton")} <ArrowRight size={16} />
             </PrimaryBtn>
           </Link>
-          <p style={{ marginTop: 14, fontSize: 12, color: "rgba(255,255,255,0.22)" }}>14-day free trial · Cancel anytime</p>
+          <p style={{ marginTop: 14, fontSize: 12, color: "rgba(255,255,255,0.22)" }}>30-day free trial · Cancel anytime</p>
         </div>
       </section>
 

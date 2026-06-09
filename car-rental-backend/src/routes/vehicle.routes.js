@@ -19,10 +19,12 @@ const {
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { requireRole } = require('../middleware/permissions.middleware');
 const { injectCompanyId } = require('../middleware/tenantIsolation.middleware');
+const { requireActiveSubscription } = require('../middleware/subscription.middleware');
 
 // Apply authentication and tenant isolation to ALL routes
 router.use(authenticateToken);
 router.use(injectCompanyId);
+router.use(requireActiveSubscription);
 
 // ============================================
 // MAINTENANCE ROUTES (MUST BE BEFORE /:id)

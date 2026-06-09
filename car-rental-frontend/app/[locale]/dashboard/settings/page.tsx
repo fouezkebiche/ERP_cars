@@ -4,6 +4,7 @@
 import type React from "react"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import SubscriptionBillingCard from "@/components/subscription/SubscriptionBillingCard"
 import { Save, Bell, X } from "lucide-react"
 import toast from "react-hot-toast"
 import { useNotifications } from "@/hooks/useNotifications"
@@ -200,6 +201,13 @@ export default function SettingsPage() {
       }
     }
     loadGeoData()
+  }, [])
+
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab")
+    if (tab && ["company", "settings", "billing", "notifications"].includes(tab)) {
+      setActiveTab(tab)
+    }
   }, [])
 
   useEffect(() => {
@@ -436,22 +444,7 @@ export default function SettingsPage() {
         {/* ── BILLING ─────────────────────────────────────────────────────── */}
         {activeTab === "billing" && (
           <SectionCard title={t("currentSubscription")}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-              {[
-                { label: t("plan"),         value: "Professional" },
-                { label: t("billingCycle"), value: "Monthly" },
-                { label: t("amount"),       value: "15,000 DZD" },
-                { label: t("renewalDate"),  value: "Feb 4, 2025" },
-              ].map(({ label, value }) => (
-                <div key={label} style={{
-                  background: SURFACE2, borderRadius: 10, padding: '14px 16px',
-                  border: `1px solid ${BORDER_COLOR}`,
-                }}>
-                  <p style={{ fontSize: 12, color: MUTED, marginBottom: 4 }}>{label}</p>
-                  <p style={{ fontSize: 15, fontWeight: 600, color: TEXT, margin: 0 }}>{value}</p>
-                </div>
-              ))}
-            </div>
+            <SubscriptionBillingCard />
           </SectionCard>
         )}
 

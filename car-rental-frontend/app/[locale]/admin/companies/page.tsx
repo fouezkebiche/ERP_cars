@@ -29,6 +29,7 @@ import {
   fetchPlatformStats,
   suspendCompany,
   reactivateCompany,
+  updateSubscription,
   type Company,
   type PlatformStats,
   type CompaniesQuery,
@@ -117,18 +118,55 @@ function CompanyDrawer({
   onClose,
   onSuspend,
   onReactivate,
+  onSubscriptionUpdated,
   actionLoading,
 }: {
   company: Company
   onClose: () => void
   onSuspend: (id: string) => void
   onReactivate: (id: string) => void
+  onSubscriptionUpdated: (updated: Company) => void
   actionLoading: string | null
 }) {
   const t = useTranslations("admin")
   const STATUS_META = getStatusMeta(t)
   const status = STATUS_META[company.subscription_status] ?? STATUS_META.inactive
   const StatusIcon = status.icon
+  const [selectedPlan, setSelectedPlan] = useState<Company["subscription_plan"]>(company.subscription_plan)
+  const [subActionLoading, setSubActionLoading] = useState(false)
+
+  useEffect(() => {
+    setSelectedPlan(company.subscription_plan)
+  }, [company.subscription_plan])
+
+  const handleUpdatePlan = async () => {
+    setSubActionLoading(true)
+    try {
+      const updated = await updateSubscription(company.id, { subscription_plan: selectedPlan })
+      onSubscriptionUpdated(updated)
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setSubActionLoading(false)
+    }
+  }
+
+  const handleActivateSubscription = async () => {
+    setSubActionLoading(true)
+    try {
+      const mrrMap: Record<string, number> = { basic: 5000, professional: 15000, enterprise: 45000 }
+      const updated = await updateSubscription(company.id, {
+        subscription_plan: selectedPlan,
+        subscription_status: "active",
+        monthly_recurring_revenue: mrrMap[selectedPlan] ?? 0,
+      })
+      onSubscriptionUpdated(updated)
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setSubActionLoading(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -169,6 +207,24 @@ function CompanyDrawer({
             </div>
           </div>
 
+          {company.subscription_request_pending && company.subscription_request && (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-2">
+              <p className="text-sm font-semibold text-amber-200 flex items-center gap-2">
+                <CreditCard className="w-4 h-4" />
+                {t("subscriptionRequestPending")}
+              </p>
+              <p className="text-xs text-amber-200/80">
+                {t("requestedBy")}: {company.subscription_request.requested_by_name || company.subscription_request.requested_by}
+              </p>
+              <p className="text-xs text-amber-200/80">
+                {t("requestedAt")}: {fmtDate(company.subscription_request.requested_at)}
+              </p>
+              <p className="text-xs text-amber-200/80 capitalize">
+                {t("plan")}: {company.subscription_request.plan || company.subscription_plan}
+              </p>
+            </div>
+          )}
+
           {/* Details */}
           <div className="rounded-xl border border-border divide-y divide-border">
             {[
@@ -185,6 +241,43 @@ function CompanyDrawer({
                 <span className="font-medium">{value}</span>
               </div>
             ))}
+          </div>
+
+          {/* Subscription management */}
+          <div className="rounded-xl border border-border p-4 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("manageSubscription")}</p>
+            <select
+              value={selectedPlan}
+              onChange={(e) => setSelectedPlan(e.target.value as Company["subscription_plan"])}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            >
+              <option value="basic">Basic</option>
+              <option value="professional">Professional</option>
+              <option value="enterprise">Enterprise</option>
+            </select>
+            <div className="flex flex-col gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleUpdatePlan}
+                disabled={subActionLoading || selectedPlan === company.subscription_plan}
+              >
+                {subActionLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CreditCard className="w-4 h-4 mr-2" />}
+                {t("updatePlan")}
+              </Button>
+              {company.subscription_status !== "active" && (
+                <Button
+                  size="sm"
+                  onClick={handleActivateSubscription}
+                  disabled={subActionLoading}
+                  className={company.subscription_request_pending ? "bg-emerald-600 hover:bg-emerald-700" : ""}
+                >
+                  {subActionLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+                  {company.subscription_request_pending ? t("approveSubscription") : t("activateSubscription")}
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">{t("activateSubscriptionHint")}</p>
           </div>
         </div>
 
@@ -244,12 +337,19 @@ export default function CompaniesPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("")
   const [statusFilter, setStatusFilter]     = useState<"" | "active" | "trial" | "suspended" | "inactive">("")
   const [planFilter, setPlanFilter]         = useState<"" | "basic" | "professional" | "enterprise">("")
+  const [pendingOnly, setPendingOnly]       = useState(false)
 
   // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 400)
     return () => clearTimeout(timer)
   }, [search])
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("pending") === "1") {
+      setPendingOnly(true)
+    }
+  }, [])
 
   const loadCompanies = useCallback(async () => {
     setLoading(true)
@@ -261,6 +361,7 @@ export default function CompaniesPage() {
         ...(debouncedSearch && { search: debouncedSearch }),
         ...(statusFilter    && { status: statusFilter }),
         ...(planFilter      && { plan: planFilter }),
+        ...(pendingOnly     && { pending_subscription: true }),
       }
       const result = await fetchAllCompanies(query)
       setCompanies(result.companies)
@@ -271,7 +372,7 @@ export default function CompaniesPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, debouncedSearch, statusFilter, planFilter, t])
+  }, [page, debouncedSearch, statusFilter, planFilter, pendingOnly, t])
 
   useEffect(() => {
     loadCompanies()
@@ -302,6 +403,11 @@ export default function CompaniesPage() {
     }
   }
 
+  const handleSubscriptionUpdated = (updated: Company) => {
+    setCompanies((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)))
+    setSelectedCompany((s) => (s?.id === updated.id ? { ...s, ...updated } : s))
+  }
+
   const handleReactivate = async (id: string) => {
     setActionLoading(id)
     try {
@@ -322,10 +428,12 @@ export default function CompaniesPage() {
     setSearch("")
     setStatusFilter("")
     setPlanFilter("")
+    setPendingOnly(false)
     setPage(1)
   }
 
-  const hasFilters = search || statusFilter || planFilter
+  const hasFilters = search || statusFilter || planFilter || pendingOnly
+  const pendingCount = stats?.companies.pending_subscription_requests ?? 0
 
   return (
     <div className="min-h-screen bg-background">
@@ -344,6 +452,22 @@ export default function CompaniesPage() {
             {t("refresh")}
           </Button>
         </div>
+
+        {pendingCount > 0 && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 flex flex-wrap items-center gap-3">
+            <CreditCard className="w-5 h-5 text-amber-500 shrink-0" />
+            <p className="text-sm text-amber-200 flex-1">
+              {t("pendingRequestsAlert", { count: pendingCount })}
+            </p>
+            <Button
+              size="sm"
+              variant={pendingOnly ? "default" : "outline"}
+              onClick={() => { setPendingOnly(!pendingOnly); setPage(1) }}
+            >
+              {pendingOnly ? t("showAllCompanies") : t("viewPendingRequests")}
+            </Button>
+          </div>
+        )}
 
         {/* ── Stats Row ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -483,7 +607,14 @@ export default function CompaniesPage() {
                               </span>
                             </div>
                             <div>
-                              <p className="font-medium leading-tight">{company.name}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium leading-tight">{company.name}</p>
+                                {company.subscription_request_pending && (
+                                  <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                                    {t("pending")}
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-xs text-muted-foreground">{company.email}</p>
                             </div>
                           </div>
@@ -621,6 +752,7 @@ export default function CompaniesPage() {
           onClose={() => setSelectedCompany(null)}
           onSuspend={handleSuspend}
           onReactivate={handleReactivate}
+          onSubscriptionUpdated={handleSubscriptionUpdated}
           actionLoading={actionLoading}
         />
       )}

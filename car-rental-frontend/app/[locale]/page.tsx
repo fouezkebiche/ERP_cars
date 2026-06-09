@@ -258,7 +258,7 @@ export default function LandingPage() {
             </PrimaryBtn>
           </Link>
           <p style={{ marginTop: 14, fontSize: 12, color: "rgba(255,255,255,0.24)" }}>
-            Free 14-day trial · No credit card required
+            Free 30-day trial · No credit card required
           </p>
         </div>
 
@@ -467,7 +467,7 @@ export default function LandingPage() {
             </PrimaryBtn>
           </Link>
           <p style={{ marginTop: 16, fontSize: 12, color: "rgba(255,255,255,0.24)" }}>
-            No credit card required · 14-day free trial
+            No credit card required · 30-day free trial
           </p>
         </div>
       </section>

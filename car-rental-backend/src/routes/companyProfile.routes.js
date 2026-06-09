@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth.middleware'); // Your auth middleware
 const { getProfile, updateProfile, updateSettings } = require('../controllers/company.controller');
+const { getSubscriptionStatus, requestUpgrade, listPlans, changePlan } = require('../controllers/subscription.controller');
 
 const { injectCompanyId, validateTenantOwnership } = require('../middleware/tenantIsolation.middleware');
 
@@ -13,6 +14,12 @@ router.use(injectCompanyId);
 
 // GET /api/company/profile
 router.get('/profile', getProfile);
+
+// Subscription (accessible even when trial expired)
+router.get('/subscription', getSubscriptionStatus);
+router.get('/subscription/plans', listPlans);
+router.put('/subscription/plan', changePlan);
+router.post('/subscription/request-upgrade', requestUpgrade);
 
 
 // PUT /api/company/profile - Update company profile

@@ -9,7 +9,10 @@ import {
   ChevronDown, Wallet,
 } from "lucide-react"
 import { useAuth } from "@/context/AuthContext"
+import { CompanyProvider } from "@/context/CompanyContext"
 import { PermissionGate, RoleDisplay } from "@/components/auth/ProtectedRoute"
+import TrialBanner from "@/components/subscription/TrialBanner"
+import TrialExpiredOverlay from "@/components/subscription/TrialExpiredOverlay"
 import { useTranslations } from "next-intl"
 import LanguageSwitcher from "@/components/LanguageSwitcher"
 
@@ -52,6 +55,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
+    <CompanyProvider>
     <div style={{ minHeight: "100vh", background: BG, color: "#fff", fontFamily: FONT, display: "flex" }}>
       <style>{`
         * { box-sizing: border-box; }
@@ -244,9 +248,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </header>
 
         <main style={{ flex: 1, padding: "28px 24px" }}>
-          {children}
+          <TrialBanner />
+          <TrialExpiredOverlay>
+            {children}
+          </TrialExpiredOverlay>
         </main>
       </div>
     </div>
+    </CompanyProvider>
   )
 }

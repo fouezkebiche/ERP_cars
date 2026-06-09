@@ -1,6 +1,12 @@
 const { Company } = require('../models');
 const { sendSuccess, sendError } = require('../utils/response.util');
 const { body, validationResult } = require('express-validator');
+const { sendEmail } = require('../services/email.service');
+const { resolveSubscriptionPlan, getTrialEndDate } = require('../utils/subscription.util');
+const { TRIAL_DURATION_DAYS } = require('../constants/subscription.constants');
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || process.env.EMAIL_USER;
 
 // POST /api/companies - Create new company (public for signup)
 const createCompany = [
@@ -8,7 +14,7 @@ const createCompany = [
   body('name').notEmpty().withMessage('Company name required'),
   body('email').isEmail().withMessage('Valid email required').normalizeEmail(),
   body('phone').optional().isMobilePhone('ar-DZ'), // Algerian format
-  body('subscription_plan').optional().isIn(['basic', 'professional', 'enterprise']),
+  body('subscription_plan').optional().isString(),
 
   async (req, res) => {
     try {
@@ -17,7 +23,8 @@ const createCompany = [
         return sendError(res, { statusCode: 422, message: 'Validation failed', details: errors.array() });
       }
 
-      const { name, email, phone, subscription_plan = 'basic', subscription_status = 'trial' } = req.body;
+      const { name, email, phone, subscription_plan: rawPlan = 'basic', subscription_status = 'trial' } = req.body;
+      const subscription_plan = await resolveSubscriptionPlan(rawPlan);
 
       // Check if company with email exists
       const existing = await Company.findOne({ where: { email } });
@@ -25,6 +32,7 @@ const createCompany = [
         return sendError(res, { statusCode: 409, message: 'Company with this email already exists' });
       }
 
+      const trialEndsAt = getTrialEndDate();
       const company = await Company.create({
         name,
         email,
@@ -32,7 +40,8 @@ const createCompany = [
         subscription_plan,
         subscription_status,
         subscription_start_date: new Date(),
-        trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days trial
+        trial_ends_at: trialEndsAt,
+        settings: { trial_emails_sent: [] },
       });
 
       // Convert to plain object
@@ -50,7 +59,27 @@ const createCompany = [
       console.log('🏢 DEBUG - About to send response with company:', safeCompany);
 
       console.log('🏢 New company created:', name, 'with ID:', company.id);
-      
+
+      // Welcome email (non-blocking)
+      sendEmail({
+        to: email,
+        templateType: 'trial_welcome',
+        data: {
+          companyName: name,
+          plan: subscription_plan.charAt(0).toUpperCase() + subscription_plan.slice(1),
+          trialDays: TRIAL_DURATION_DAYS,
+          trialEndsAt: trialEndsAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+          dashboardUrl: `${FRONTEND_URL}/en/dashboard`,
+          supportEmail: SUPPORT_EMAIL,
+        },
+      }).then(async (result) => {
+        if (result.success) {
+          const fresh = await Company.findByPk(company.id);
+          const sent = fresh?.settings?.trial_emails_sent || [];
+          await fresh.update({ settings: { ...(fresh.settings || {}), trial_emails_sent: [...sent, 'welcome'] } });
+        }
+      }).catch((err) => console.error('Welcome email failed:', err));
+
       sendSuccess(res, {
         statusCode: 201,
         message: 'Company created successfully',

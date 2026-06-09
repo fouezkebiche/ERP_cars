@@ -120,6 +120,101 @@ const EMAIL_TEMPLATES = {
     `,
   },
 
+  trial_welcome: {
+    subject: '🎉 Welcome to CarManager — Your 30-Day Free Trial Has Started',
+    getHtml: (data) => `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #22c55e;">Welcome to CarManager!</h2>
+        <p>Dear ${data.companyName},</p>
+        <p>Your account has been created successfully. You now have <strong>${data.trialDays} days</strong> of free access to explore everything CarManager has to offer.</p>
+
+        <div style="background: #f0fdf4; border-left: 4px solid #22c55e; padding: 20px; margin: 20px 0; border-radius: 8px;">
+          <h3 style="margin-top: 0; color: #15803d;">Your Trial Details</h3>
+          <p style="margin: 8px 0;"><strong>Plan:</strong> ${data.plan}</p>
+          <p style="margin: 8px 0;"><strong>Trial ends:</strong> ${data.trialEndsAt}</p>
+          <p style="margin: 8px 0;"><strong>No credit card required</strong> during your trial.</p>
+        </div>
+
+        <p>Get started by adding your vehicles, registering customers, and creating your first rental contract.</p>
+
+        <a href="${data.dashboardUrl}" style="display: inline-block; background: #22c55e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: bold;">
+          Go to Dashboard
+        </a>
+
+        <p style="color: #6b7280; font-size: 14px;">
+          Questions? Reply to this email or contact us at ${data.supportEmail || 'support@carmanager.com'}.
+        </p>
+      </div>
+    `,
+  },
+
+  trial_expiring: {
+    subject: (data) => `⏰ Your CarManager trial ends in ${data.daysLeft} day${data.daysLeft === 1 ? '' : 's'}`,
+    getHtml: (data) => `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #f59e0b;">⏰ Trial Ending Soon</h2>
+        <p>Dear ${data.companyName},</p>
+
+        <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 20px; margin: 20px 0; border-radius: 8px;">
+          <p style="font-size: 18px; margin: 0;">
+            Your free trial ends in <strong>${data.daysLeft} day${data.daysLeft === 1 ? '' : 's'}</strong>
+          </p>
+          <p style="margin: 10px 0 0; color: #92400e;">Trial end date: <strong>${data.trialEndsAt}</strong></p>
+        </div>
+
+        <p>To keep using CarManager without interruption, subscribe to your plan before the trial ends.</p>
+
+        <a href="${data.billingUrl}" style="display: inline-block; background: #22c55e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: bold;">
+          Subscribe Now
+        </a>
+
+        <p style="color: #6b7280; font-size: 14px;">
+          After your trial ends, access to the platform will be paused until you subscribe.
+        </p>
+      </div>
+    `,
+  },
+
+  trial_expired: {
+    subject: '🔒 Your CarManager Free Trial Has Ended',
+    getHtml: (data) => `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #dc2626;">Your Free Trial Has Ended</h2>
+        <p>Dear ${data.companyName},</p>
+
+        <div style="background: #fee2e2; border-left: 4px solid #dc2626; padding: 20px; margin: 20px 0; border-radius: 8px;">
+          <p style="margin: 0; font-size: 16px;">
+            Your 30-day free trial on the <strong>${data.plan}</strong> plan has ended.
+            Your account is now paused until you subscribe.
+          </p>
+        </div>
+
+        <p>We hope CarManager helped streamline your rental operations. Subscribe now to restore full access to your fleet, customers, and contracts.</p>
+
+        <a href="${data.billingUrl}" style="display: inline-block; background: #22c55e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: bold; font-size: 16px;">
+          Subscribe &amp; Restore Access
+        </a>
+
+        <p>Need help choosing a plan? Contact us at <a href="mailto:${data.supportEmail}">${data.supportEmail}</a>.</p>
+      </div>
+    `,
+  },
+
+  upgrade_request_received: {
+    subject: '✅ We received your subscription request',
+    getHtml: (data) => `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #22c55e;">Subscription Request Received</h2>
+        <p>Dear ${data.companyName},</p>
+        <p>Thank you for your interest in subscribing to the <strong>${data.plan}</strong> plan.</p>
+        <p>Our team has received your request and will contact you within 1–2 business days to complete your subscription.</p>
+        <p style="color: #6b7280; font-size: 14px;">
+          Questions in the meantime? Email us at <a href="mailto:${data.supportEmail}">${data.supportEmail}</a>.
+        </p>
+      </div>
+    `,
+  },
+
   maintenance_due: {
     subject: '⚠️ Vehicle Maintenance Required',
     getHtml: (data) => `
@@ -180,12 +275,16 @@ const sendEmail = async ({ to, templateType, data, cc, bcc }) => {
       throw new Error(`Unknown email template: ${templateType}`);
     }
 
+    const subject = typeof template.subject === 'function'
+      ? template.subject(data)
+      : template.subject;
+
     const mailOptions = {
       from: `"Car Rental System" <${process.env.EMAIL_USER}>`,
       to,
       cc,
       bcc,
-      subject: template.subject,
+      subject,
       html: template.getHtml(data),
     };
 

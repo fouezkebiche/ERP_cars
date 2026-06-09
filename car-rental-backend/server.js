@@ -4,6 +4,8 @@ const { sequelize, testConnection } = require('./src/config/database');
 const { scheduleVehicleLimitCheck } = require('./src/jobs/vehicleLimitMonitoring.job');
 const { scheduleMaintenanceMonitoring } = require('./src/jobs/vehicleMaintenanceMonitoring.job');
 const { scheduleKmLimitMonitoring } = require('./src/jobs/kmLimitMonitoring.job');
+const { scheduleTrialExpiration } = require('./src/jobs/trialExpiration.job');
+const { verifyEmailConfig } = require('./src/services/email.service');
 
 const PORT = process.env.PORT || 5000;
 
@@ -24,7 +26,11 @@ const startServer = async () => {
     scheduleVehicleLimitCheck();        // Daily at 9 AM
     scheduleMaintenanceMonitoring();    // Every 6 hours + daily at 8 AM
     scheduleKmLimitMonitoring();        // Every 4 hours
+    scheduleTrialExpiration();          // Daily at 8 AM
     console.log('✅ All cron jobs scheduled');
+
+    // Verify email config (non-blocking)
+    verifyEmailConfig().catch(() => {});
 
     // 4. Start the server
     app.listen(PORT, () => {
